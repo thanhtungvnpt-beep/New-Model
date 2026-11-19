@@ -1,0 +1,6 @@
+{
+  "name": "KHV Production Management",
+  "description": "Hệ thống quản lý và giám sát tiến độ dự án sản xuất, chuỗi cung ứng và sự cố dây chuyền KHV.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
