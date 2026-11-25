@@ -1,12 +1,69 @@
 export type LineHealthStatus =
-  | 'Hoàn thành'
-  | 'Chạy Tốt'
-  | 'Đang Setup'
-  | 'Gần xong'
+  | 'Đang sản xuất'
+  | 'Dừng do Máy hỏng'
+  | 'Dừng do Vật liệu'
+  | 'Dừng do Lỗi thao tác'
+  | 'Dừng Chất lượng'
+  | 'Dừng do Sự cố điện'
+  | 'Dừng do Thiếu người'
+  | 'Dừng Bảo dưỡng'
+  | 'Dừng Vệ Sinh'
+  | 'Dừng do Lỗi khác'
+  | 'Dừng do Hết Plan'
+  | 'Dừng hoàn thành Plan'
   | 'Chờ Vật Tư'
-  | 'Đang test'
-  | 'Chờ xuất'
-  | 'Đã kích hoạt';
+  | 'Đủ Vật Tư'
+  | 'Đang Lắp Ráp'
+  | 'Đang cài đặt'
+  | 'Chạy thử'
+  | 'Test Lại'
+  | 'Mass Ready'
+  | 'Tạm Hoãn';
+
+export const MASS_LINE_STATUSES: LineHealthStatus[] = [
+  'Đang sản xuất',
+  'Dừng do Máy hỏng',
+  'Dừng do Vật liệu',
+  'Dừng do Lỗi thao tác',
+  'Dừng Chất lượng',
+  'Dừng do Sự cố điện',
+  'Dừng do Thiếu người',
+  'Dừng Bảo dưỡng',
+  'Dừng Vệ Sinh',
+  'Dừng do Lỗi khác',
+  'Dừng do Hết Plan',
+  'Dừng hoàn thành Plan',
+];
+
+export const MASS_STOP_ISSUE_STATUSES: LineHealthStatus[] = [
+  'Dừng do Máy hỏng',
+  'Dừng do Vật liệu',
+  'Dừng do Lỗi thao tác',
+  'Dừng Chất lượng',
+  'Dừng do Sự cố điện',
+  'Dừng do Thiếu người',
+  'Dừng Bảo dưỡng',
+  'Dừng Vệ Sinh',
+  'Dừng do Lỗi khác',
+  'Dừng do Hết Plan',
+];
+
+export function isMassStopIssueStatus(status: LineHealthStatus): boolean {
+  return MASS_STOP_ISSUE_STATUSES.includes(status);
+}
+
+export const NEW_LINE_STATUSES: LineHealthStatus[] = [
+  'Chờ Vật Tư',
+  'Đủ Vật Tư',
+  'Đang Lắp Ráp',
+  'Đang cài đặt',
+  'Chạy thử',
+  'Test Lại',
+  'Mass Ready',
+  'Tạm Hoãn',
+];
+
+export type LineCharacteristic = 'new' | 'mas';
 
 export interface LineSetupTimeline {
   targetDate: string; // Ngày cần hoàn thành (YYYY-MM-DD)
@@ -19,6 +76,7 @@ export interface ProductionLine {
   name: string;
   stage: string;
   shortStage: string;
+  characteristic: LineCharacteristic;
   vtPercent: number;
   healthPercent: number;
   issueCount: number;
@@ -49,6 +107,14 @@ export interface PipelineItem {
 
 export type IssueSeverity = 'high' | 'medium' | 'low';
 
+export interface IssueHistoryEntry {
+  timestamp: string;
+  progress: number;
+  statusText: string;
+  note: string;
+  author?: string;
+}
+
 export interface IssueItem {
   id: string;
   line: string;
@@ -65,6 +131,8 @@ export interface IssueItem {
   notes: string;
   isSynced?: boolean;
   highlightActionText?: string;
+  resolvedAt?: string;
+  history?: IssueHistoryEntry[];
 }
 
 export interface AuditLogEntry {

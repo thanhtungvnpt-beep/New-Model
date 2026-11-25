@@ -16,7 +16,18 @@ import {
   X,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { AuditLogEntry, IssueItem, PipelineItem, ProductionLine } from '../../types/production';
+import { formatLineTimestamp } from '../../data/initialData';
+import {
+  AuditLogEntry,
+  isMassStopIssueStatus,
+  IssueItem,
+  LineCharacteristic,
+  LineHealthStatus,
+  MASS_LINE_STATUSES,
+  NEW_LINE_STATUSES,
+  PipelineItem,
+  ProductionLine,
+} from '../../types/production';
 
 interface AdminAuthModalProps {
   isOpen: boolean;
@@ -35,7 +46,7 @@ export function AdminAuthModal({ isOpen, onClose, onAuthenticate }: AdminAuthMod
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6">
+    <div className="fixed inset-0 z-[60] overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6">
       <div className="relative bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-blue-700 to-blue-900 text-white flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -638,18 +649,37 @@ interface IssueDetailModalProps {
 export function IssueDetailModal({ issue, onClose, onSaveProgress }: IssueDetailModalProps) {
   const [progress, setProgress] = useState(0);
   const [notes, setNotes] = useState('');
+  const [notesError, setNotesError] = useState('');
 
   useEffect(() => {
     if (issue) {
       setProgress(issue.progress);
-      setNotes(issue.notes);
+      setNotes('');
+      setNotesError('');
     }
   }, [issue]);
 
   if (!issue) return null;
 
+  const isNotesValid = notes.trim().length > 0;
+
+  const handleSaveClick = () => {
+    const trimmedNotes = notes.trim();
+    if (!trimmedNotes) {
+      setNotesError(
+        'Vui lòng nhập Ghi chú tiến độ / Biện pháp xử lý tức thời trước khi lưu cập nhật sự cố.'
+      );
+      const el = document.getElementById('issue-detail-notes-input');
+      el?.focus();
+      return;
+    }
+    setNotesError('');
+    onSaveProgress(issue.id, progress, trimmedNotes);
+    onClose();
+  };
+
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6">
+    <div className="fixed inset-0 z-[60] overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6">
       <div className="relative bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-slate-200 flex flex-col max-h-[92vh] overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-rose-700 via-rose-600 to-rose-800 text-white flex items-center justify-between gap-4">
           <div>
@@ -732,9 +762,20 @@ export function IssueDetailModal({ issue, onClose, onSaveProgress }: IssueDetail
             </div>
 
             <div>
-              <label className="font-bold text-slate-800 block mb-1">
-                Cập Nhật Tiến Độ Khắc Phục (%):
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="font-bold text-slate-800">
+                  Cập Nhật Tiến Độ Khắc Phục (%):
+                </label>
+                {progress < 100 && (
+                  <button
+                    type="button"
+                    onClick={() => setProgress(100)}
+                    className="px-2 py-0.5 rounded bg-emerald-50 hover:bg-emerald-600 text-emerald-700 hover:text-white border border-emerald-300 text-[10px] font-bold transition cursor-pointer"
+                  >
+                    Đặt 100% (Tự trừ Issue)
+                  </button>
+                )}
+              </div>
               <div className="flex items-center gap-2 mt-2">
                 <input
                   type="range"
@@ -744,28 +785,101 @@ export function IssueDetailModal({ issue, onClose, onSaveProgress }: IssueDetail
                   onChange={(e) => setProgress(Number(e.target.value))}
                   className="w-full accent-rose-600 cursor-pointer"
                 />
-                <span className="font-bold text-sm text-rose-700 w-12 text-right tabular-nums">
+                <span
+                  className={`font-bold text-sm w-12 text-right tabular-nums ${
+                    progress >= 100 ? 'text-emerald-700' : 'text-rose-700'
+                  }`}
+                >
                   {progress}%
                 </span>
               </div>
+              {progress >= 100 && issue.progress < 100 && (
+                <p className="text-[10px] text-emerald-700 font-semibold mt-1">
+                  Đạt 100%: Khi lưu sẽ tự động trừ 1 Issue trên thẻ {issue.line}.
+                </p>
+              )}
             </div>
           </div>
 
           <div>
-            <label className="font-bold text-slate-800 block mb-1">
-              Ghi Chú Tiến Độ / Biện Pháp Xử Lý Tức Thời:
-            </label>
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <label
+                htmlFor="issue-detail-notes-input"
+                className="font-bold text-slate-800 block"
+              >
+                Ghi Chú Tiến Độ / Biện Pháp Xử Lý Tức Thời:{' '}
+                <span className="text-rose-600">*</span>
+              </label>
+              <span
+                className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                  isNotesValid
+                    ? 'bg-emerald-100 text-emerald-700'
+                    : 'bg-rose-100 text-rose-700'
+                }`}
+              >
+                {isNotesValid ? 'Đã nhập ghi chú' : 'Bắt buộc nhập'}
+              </span>
+            </div>
             <textarea
+              id="issue-detail-notes-input"
+              required
               rows={3}
               value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 text-xs p-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              onChange={(e) => {
+                setNotes(e.target.value);
+                if (notesError && e.target.value.trim()) {
+                  setNotesError('');
+                }
+              }}
+              placeholder="Nhập ghi chú tiến độ mới hoặc biện pháp xử lý tức thời (bắt buộc trước khi lưu)..."
+              className={`w-full rounded-lg border text-xs p-2.5 focus:ring-2 focus:outline-none ${
+                notesError
+                  ? 'border-rose-500 bg-rose-50/40 focus:ring-rose-500'
+                  : 'border-slate-300 focus:ring-blue-500'
+              }`}
             />
+            {notesError ? (
+              <p className="text-[11px] font-bold text-rose-600 mt-1">{notesError}</p>
+            ) : !isNotesValid ? (
+              <p className="text-[11px] text-amber-700 font-medium mt-1">
+                Phải nhập nội dung vào ô Ghi chú tiến độ / Biện pháp xử lý tức thời mới cho phép lưu cập nhật sự cố.
+              </p>
+            ) : null}
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 space-y-2">
+            <div className="font-bold text-slate-800 flex items-center gap-1.5">
+              <History className="w-3.5 h-3.5 text-blue-600" />
+              <span>Lịch Sử Cập Nhật &amp; Khắc Phục Issue</span>
+            </div>
+            <div className="space-y-1.5 border-l-2 border-slate-300 pl-3 ml-1">
+              {(issue.history && issue.history.length > 0
+                ? issue.history
+                : [
+                    {
+                      timestamp: issue.sinceTime,
+                      progress: issue.progress,
+                      statusText: issue.statusText,
+                      note: issue.notes,
+                      author: issue.assignee,
+                    },
+                  ]
+              ).map((entry, idx) => (
+                <div key={`detail-hist-${idx}`} className="text-[11px] text-slate-700">
+                  <span className="font-bold text-slate-900 tabular-nums">[{entry.timestamp}]</span>{' '}
+                  <span className="font-bold text-blue-700 tabular-nums">{entry.progress}%</span>{' '}
+                  <span className="font-semibold text-slate-700">· {entry.statusText}</span>
+                  {entry.note && <p className="text-slate-600 mt-0.5">{entry.note}</p>}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 
-        <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
-          <span className="text-xs text-slate-500">Đồng bộ trực tiếp vào Sổ theo dõi sự cố</span>
+        <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3">
+          <span className="text-xs text-slate-500">
+            Đồng bộ trực tiếp vào Lịch sử &amp; Sổ theo dõi sự cố
+          </span>
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -776,11 +890,13 @@ export function IssueDetailModal({ issue, onClose, onSaveProgress }: IssueDetail
             </button>
             <button
               type="button"
-              onClick={() => {
-                onSaveProgress(issue.id, progress, notes);
-                onClose();
-              }}
-              className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm inline-flex items-center gap-1.5 cursor-pointer"
+              aria-disabled={!isNotesValid}
+              onClick={handleSaveClick}
+              className={`px-4 py-2 text-xs font-bold rounded-lg shadow-sm inline-flex items-center gap-1.5 transition ${
+                isNotesValid
+                  ? 'text-white bg-blue-600 hover:bg-blue-700 cursor-pointer'
+                  : 'text-slate-500 bg-slate-200 border border-slate-300 cursor-not-allowed'
+              }`}
             >
               <Save className="w-4 h-4" />
               <span>Lưu Cập Nhật Sự Cố</span>
@@ -807,6 +923,8 @@ export function AddLineModal({
 }: AddLineModalProps) {
   const [lineName, setLineName] = useState(`Line ${nextLineNumber}`);
   const [stage, setStage] = useState('Final Inspection & QA');
+  const [characteristic, setCharacteristic] = useState<LineCharacteristic>('new');
+  const [statusLabel, setStatusLabel] = useState<LineHealthStatus>('Đang Lắp Ráp');
   const [progress, setProgress] = useState(80);
   const [issueCount, setIssueCount] = useState(0);
   const [leader, setLeader] = useState(`Trần Quốc Thắng (Kỹ sư Line ${nextLineNumber})`);
@@ -814,6 +932,8 @@ export function AddLineModal({
   useEffect(() => {
     setLineName(`Line ${nextLineNumber}`);
     setLeader(`Trần Quốc Thắng (Kỹ sư Line ${nextLineNumber})`);
+    setCharacteristic('new');
+    setStatusLabel('Đang Lắp Ráp');
   }, [nextLineNumber, isOpen]);
 
   if (!isOpen) return null;
@@ -846,18 +966,78 @@ export function AddLineModal({
           className="p-6 space-y-4 text-xs"
           onSubmit={(e) => {
             e.preventDefault();
+            const finalStatus: LineHealthStatus =
+              characteristic === 'mas'
+                ? MASS_LINE_STATUSES.includes(statusLabel)
+                  ? statusLabel
+                  : 'Đang sản xuất'
+                : NEW_LINE_STATUSES.includes(statusLabel)
+                ? statusLabel
+                : 'Đang Lắp Ráp';
+            const autoIssueForStop =
+              characteristic === 'mas' && isMassStopIssueStatus(finalStatus);
+            const finalIssueCount = autoIssueForStop ? Math.max(1, issueCount) : issueCount;
             onCreateLine({
               id: `line-${nextLineNumber}-${Date.now()}`,
               name: lineName,
               stage: `${lineName} - ${stage}`,
               shortStage: stage.split(' ')[0] || 'QA',
-              vtPercent: progress,
+              characteristic,
+              vtPercent:
+                finalStatus === 'Mass Ready' ||
+                finalStatus === 'Đủ Vật Tư' ||
+                finalStatus === 'Dừng hoàn thành Plan'
+                  ? 100
+                  : progress,
               healthPercent: progress,
-              issueCount,
-              statusLabel: 'Đã kích hoạt',
-              healthBadge: issueCount > 0 ? 'Cần theo dõi' : 'Ổn định',
-              healthTone: issueCount > 1 ? 'amber' : 'emerald',
+              issueCount: finalIssueCount,
+              statusLabel: finalStatus,
+              healthBadge:
+                finalStatus === 'Dừng do Máy hỏng' ||
+                finalStatus === 'Dừng do Lỗi thao tác' ||
+                finalStatus === 'Dừng Chất lượng' ||
+                finalStatus === 'Dừng do Sự cố điện' ||
+                finalStatus === 'Tạm Hoãn'
+                  ? 'Nút thắt cổ chai'
+                  : finalStatus === 'Dừng do Vật liệu' || finalStatus === 'Chờ Vật Tư'
+                  ? 'Cần bổ sung vật tư'
+                  : finalStatus === 'Dừng do Hết Plan'
+                  ? 'Chờ kế hoạch'
+                  : finalStatus === 'Dừng do Thiếu người' ||
+                    finalStatus === 'Dừng Bảo dưỡng' ||
+                    finalStatus === 'Dừng Vệ Sinh' ||
+                    finalStatus === 'Dừng do Lỗi khác' ||
+                    finalStatus === 'Đang Lắp Ráp' ||
+                    finalStatus === 'Đang cài đặt' ||
+                    finalStatus === 'Test Lại'
+                  ? 'Chờ kiểm tra'
+                  : finalStatus === 'Chạy thử'
+                  ? 'Sắp hoàn thành'
+                  : issueCount > 0
+                  ? 'Cần theo dõi'
+                  : 'Ổn định',
+              healthTone:
+                finalStatus === 'Dừng do Máy hỏng' ||
+                finalStatus === 'Dừng do Lỗi thao tác' ||
+                finalStatus === 'Dừng Chất lượng' ||
+                finalStatus === 'Dừng do Sự cố điện' ||
+                finalStatus === 'Tạm Hoãn'
+                  ? 'rose'
+                  : finalStatus === 'Dừng do Vật liệu' ||
+                    finalStatus === 'Dừng do Thiếu người' ||
+                    finalStatus === 'Dừng Bảo dưỡng' ||
+                    finalStatus === 'Dừng Vệ Sinh' ||
+                    finalStatus === 'Dừng do Lỗi khác' ||
+                    finalStatus === 'Dừng do Hết Plan' ||
+                    finalStatus === 'Chờ Vật Tư' ||
+                    finalStatus === 'Đang Lắp Ráp' ||
+                    finalStatus === 'Đang cài đặt' ||
+                    finalStatus === 'Test Lại' ||
+                    issueCount > 1
+                  ? 'amber'
+                  : 'emerald',
               leader,
+              updatedAt: formatLineTimestamp(),
             });
             onClose();
           }}
@@ -926,6 +1106,74 @@ export function AddLineModal({
                 onChange={(e) => setIssueCount(Math.max(0, Number(e.target.value) || 0))}
                 className="w-full rounded-lg border border-slate-300 text-xs px-3 py-2 tabular-nums"
               />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block font-semibold text-slate-700 mb-1.5">
+                Đặc Tính Line *
+              </label>
+              <div className="grid grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCharacteristic('new');
+                    if (!NEW_LINE_STATUSES.includes(statusLabel)) {
+                      setStatusLabel('Đang Lắp Ráp');
+                    }
+                  }}
+                  className={`px-3 py-2 rounded-lg border text-left cursor-pointer transition ${
+                    characteristic === 'new'
+                      ? 'border-violet-500 bg-violet-50 text-violet-950 font-bold'
+                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  <span className="block font-bold">New · Test model mới</span>
+                  <span className="text-[10px] opacity-80">Line đang test thử model mới</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCharacteristic('mas');
+                    if (!MASS_LINE_STATUSES.includes(statusLabel)) {
+                      setStatusLabel(issueCount > 0 ? 'Dừng do Máy hỏng' : 'Đang sản xuất');
+                    }
+                  }}
+                  className={`px-3 py-2 rounded-lg border text-left cursor-pointer transition ${
+                    characteristic === 'mas'
+                      ? 'border-sky-500 bg-sky-50 text-sky-950 font-bold'
+                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  <span className="block font-bold">Mass · SX hàng loạt</span>
+                  <span className="text-[10px] opacity-80">Đã đi vào sản xuất hàng loạt</span>
+                </button>
+              </div>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block font-semibold text-slate-700 mb-1">
+                Trạng thái vận hành *
+              </label>
+              <select
+                value={statusLabel}
+                onChange={(e) => {
+                  const next = e.target.value as LineHealthStatus;
+                  setStatusLabel(next);
+                  if (characteristic === 'mas' && isMassStopIssueStatus(next) && issueCount === 0) {
+                    setIssueCount(1);
+                  }
+                }}
+                className="w-full rounded-lg border border-slate-300 text-xs px-3 py-2 bg-white font-semibold"
+              >
+                {(characteristic === 'mas' ? MASS_LINE_STATUSES : NEW_LINE_STATUSES).map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+              {characteristic === 'mas' && isMassStopIssueStatus(statusLabel) && (
+                <p className="text-[10px] text-rose-700 font-semibold mt-1">
+                  Trạng thái dừng máy trên Line Mass sẽ tự động ghi nhận vào Issue.
+                </p>
+              )}
             </div>
             <div className="sm:col-span-2">
               <label className="block font-semibold text-slate-700 mb-1">

@@ -14,6 +14,7 @@ import {
   ExportIssuesModal,
   IssueDetailModal,
 } from './components/modals/GovernanceModals';
+import { LineIssuesModal } from './components/modals/LineIssuesModal';
 import { LineQuickReportModal } from './components/modals/LineQuickReportModal';
 import {
   OperationFormModal,
@@ -27,15 +28,26 @@ import {
   INITIAL_LINES,
   INITIAL_PIPELINE_ITEMS,
   downloadCsvFile,
+  formatLineTimestamp,
 } from './data/initialData';
 import {
   AuditLogEntry,
+  isMassStopIssueStatus,
   IssueItem,
+  IssueSeverity,
   OperationTab,
   PipelineItem,
   ProductionLine,
   ToastNotification,
 } from './types/production';
+
+function getNextIssueId(list: IssueItem[], offset = 0): string {
+  const maxNum = list.reduce((max, item) => {
+    const match = /^ISS-(\d+)$/.exec(item.id);
+    return match ? Math.max(max, Number(match[1])) : max;
+  }, 0);
+  return `ISS-${String(maxNum + 1 + offset).padStart(3, '0')}`;
+}
 
 export default function App() {
   const [selectedProject, setSelectedProject] = useState('KHV-2025');
@@ -62,6 +74,7 @@ export default function App() {
   const [addLineOpen, setAddLineOpen] = useState(false);
   const [editingIssueId, setEditingIssueId] = useState<string | null>(null);
   const [quickReportLineId, setQuickReportLineId] = useState<string | null>(null);
+  const [inspectIssuesTarget, setInspectIssuesTarget] = useState<string | null>(null);
 
   // Toast notifications
   const [toasts, setToasts] = useState<ToastNotification[]>([]);
@@ -179,7 +192,8 @@ export default function App() {
     description: string;
     assignee: string;
   }) => {
-    const newId = `ISS-${String(issues.length + 13).padStart(3, '0')}`;
+    const nowTime = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+    const newId = getNextIssueId(issues);
     const newIssue: IssueItem = {
       id: newId,
       line: payload.line,
@@ -190,34 +204,107 @@ export default function App() {
       assignee: payload.assignee,
       assigneeRole: 'Kỹ sư hiện trường',
       duration: '5m',
-      sinceTime: 'Vừa tạo',
+      sinceTime: `Hôm nay, ${nowTime}`,
       statusText: 'Đang kiểm tra',
       progress: 15,
       notes: payload.description,
+      history: [
+        {
+          timestamp: `Hôm nay, ${nowTime}`,
+          progress: 15,
+          statusText: 'Đang kiểm tra',
+          note: payload.description,
+          author: payload.assignee,
+        },
+      ],
     };
     setIssues((prev) => [newIssue, ...prev]);
     setLines((prev) =>
       prev.map((l) =>
-        l.name === payload.line ? { ...l, issueCount: l.issueCount + 1 } : l
+        l.name === payload.line
+          ? { ...l, issueCount: l.issueCount + 1, updatedAt: formatLineTimestamp() }
+          : l
       )
     );
     pushToast('Đã tạo báo cáo sự cố', `Sự cố ${newId} tại ${payload.line} đã được ghi nhận.`);
   };
 
   const handleSaveIssueProgress = (issueId: string, progress: number, notes: string) => {
+    const targetIssue = issues.find((i) => i.id === issueId);
+    if (!targetIssue) return;
+
+    const nowTime = `Hôm nay, ${new Date().toLocaleTimeString('vi-VN', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    const prevProgress = targetIssue.progress;
+    const wasResolved = prevProgress >= 100;
+    const isNowResolved = progress >= 100;
+    const delta = !wasResolved && isNowResolved ? -1 : wasResolved && !isNowResolved ? 1 : 0;
+    const nextStatusText =
+      progress >= 100 ? 'Đã khắc phục (100%)' : progress >= 70 ? 'Sắp hoàn tất' : 'Đang xử lý';
+
     setIssues((prev) =>
-      prev.map((iss) =>
-        iss.id === issueId
-          ? {
-              ...iss,
+      prev.map((iss) => {
+        if (iss.id !== issueId) return iss;
+        const baseHistory =
+          iss.history && iss.history.length > 0
+            ? iss.history
+            : [
+                {
+                  timestamp: iss.sinceTime,
+                  progress: iss.progress,
+                  statusText: iss.statusText,
+                  note: iss.notes,
+                  author: iss.assignee,
+                },
+              ];
+        return {
+          ...iss,
+          progress,
+          notes,
+          statusText: nextStatusText,
+          resolvedAt: isNowResolved ? iss.resolvedAt || nowTime : undefined,
+          history: [
+            {
+              timestamp: nowTime,
               progress,
-              notes,
-              statusText: progress >= 100 ? 'Đã khắc phục' : progress >= 70 ? 'Sắp hoàn tất' : 'Đang xử lý',
+              statusText: nextStatusText,
+              note: notes,
+              author: iss.assignee,
+            },
+            ...baseHistory,
+          ],
+        };
+      })
+    );
+
+    setLines((prev) =>
+      prev.map((l) =>
+        l.name === targetIssue.line
+          ? {
+              ...l,
+              issueCount: delta !== 0 ? Math.max(0, l.issueCount + delta) : l.issueCount,
+              updatedAt: formatLineTimestamp(),
             }
-          : iss
+          : l
       )
     );
-    pushToast('Cập nhật tiến độ', `Đã cập nhật tiến độ sự cố ${issueId} lên ${progress}%.`);
+
+    if (delta === -1) {
+      pushToast(
+        `Đã khắc phục 100% ${issueId} — Tự động trừ 1 Issue`,
+        `${targetIssue.line} đã tự động giảm số Issue tồn đọng.`
+      );
+    } else if (delta === 1) {
+      pushToast(
+        `Mở lại sự cố ${issueId}`,
+        `${targetIssue.line} đã cộng lại 1 Issue tồn đọng.`,
+        'amber'
+      );
+    } else {
+      pushToast('Cập nhật tiến độ', `Đã cập nhật tiến độ sự cố ${issueId} lên ${progress}%.`);
+    }
   };
 
   const handleExportFullReport = () => {
@@ -300,43 +387,132 @@ export default function App() {
         hour: '2-digit',
         minute: '2-digit',
       })}`;
+      const charChanged = prevLine.characteristic !== updatedLine.characteristic;
+      const charChangeText = charChanged
+        ? `, Đặc tính: ${prevLine.characteristic === 'new' ? 'New' : 'Mass'} -> ${
+            updatedLine.characteristic === 'new' ? 'New' : 'Mass'
+          }`
+        : '';
       setAuditLogs((prev) => [
         {
           version: `v1.${prev.length}`,
           isCurrent: true,
           timestamp: timeStr,
           author: 'Admin_KHV',
-          reason: lastAdminReason || `Chỉnh sửa thông tin cấu hình ${updatedLine.name}`,
-          changes: `${prevLine.name} (${prevLine.shortStage}, ${prevLine.leader}) -> ${updatedLine.name} (${updatedLine.shortStage}, ${updatedLine.leader})`,
+          reason:
+            lastAdminReason ||
+            (charChanged
+              ? `Admin chuyển đổi đặc tính ${updatedLine.name} (${
+                  prevLine.characteristic === 'new' ? 'New' : 'Mass'
+                } -> ${updatedLine.characteristic === 'new' ? 'New' : 'Mass'})`
+              : `Chỉnh sửa thông tin cấu hình ${updatedLine.name}`),
+          changes: `${prevLine.name} (${prevLine.shortStage}, ${prevLine.leader}${charChangeText}) -> ${updatedLine.name} (${updatedLine.shortStage}, ${updatedLine.leader})`,
           tone: 'blue',
         },
         ...prev.map((entry) => ({ ...entry, isCurrent: false })),
       ]);
     }
 
-    if (newIssue) {
-      const newId = `ISS-${String(issues.length + 13).padStart(3, '0')}`;
-      setIssues((prev) => [
-        {
-          id: newId,
-          line: updatedLine.name,
-          itemCode: 'VT-Line',
-          title: newIssue.title,
-          description: newIssue.description,
-          severity: newIssue.severity,
-          assignee: updatedLine.leader,
-          assigneeRole: `Line Leader ${updatedLine.name}`,
-          duration: 'Vừa xong',
-          sinceTime: updatedLine.updatedAt || 'Hôm nay',
-          statusText: 'Mới tiếp nhận',
-          progress: 10,
-          notes: newIssue.description,
-          isSynced: true,
-        },
-        ...prev,
-      ]);
+    const prevWasMassStop = Boolean(
+      prevLine &&
+        prevLine.characteristic === 'mas' &&
+        isMassStopIssueStatus(prevLine.statusLabel)
+    );
+    const nextIsMassStop =
+      updatedLine.characteristic === 'mas' && isMassStopIssueStatus(updatedLine.statusLabel);
+    const enteredMassStop =
+      nextIsMassStop && (!prevWasMassStop || prevLine?.statusLabel !== updatedLine.statusLabel);
+
+    const getStopSeverity = (status: ProductionLine['statusLabel']): IssueSeverity =>
+      status === 'Dừng do Máy hỏng' ||
+      status === 'Dừng do Lỗi thao tác' ||
+      status === 'Dừng Chất lượng' ||
+      status === 'Dừng do Sự cố điện'
+        ? 'high'
+        : 'medium';
+
+    const nowTime = `Hôm nay, ${new Date().toLocaleTimeString('vi-VN', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+
+    const autoStopItems: IssueItem[] = [];
+    if (enteredMassStop) {
+      const stopId = getNextIssueId(issues, autoStopItems.length);
+      const stopNote =
+        newIssue?.description?.trim() ||
+        updatedLine.lastNote?.trim() ||
+        `Tự động tạo từ trạng thái dừng máy (${updatedLine.statusLabel}).`;
+      autoStopItems.push({
+        id: stopId,
+        line: updatedLine.name,
+        itemCode: 'Mass-Stop',
+        title: newIssue?.title?.trim() || `Dừng máy: ${updatedLine.statusLabel}`,
+        description:
+          newIssue?.description?.trim() ||
+          updatedLine.lastNote?.trim() ||
+          `Line ${updatedLine.name} (Mass) chuyển sang trạng thái "${updatedLine.statusLabel}" — hệ thống tự động ghi nhận Issue dừng máy.`,
+        severity: newIssue?.severity || getStopSeverity(updatedLine.statusLabel),
+        assignee: updatedLine.leader,
+        assigneeRole: `Line Leader ${updatedLine.name}`,
+        duration: 'Vừa xong',
+        sinceTime: nowTime,
+        statusText: 'Đang xử lý dừng máy',
+        progress: 10,
+        notes: stopNote,
+        isSynced: true,
+        history: [
+          {
+            timestamp: nowTime,
+            progress: 10,
+            statusText: 'Đang xử lý dừng máy',
+            note: stopNote,
+            author: updatedLine.leader,
+          },
+        ],
+      });
+    } else if (newIssue) {
+      const manualId = getNextIssueId(issues, autoStopItems.length);
+      autoStopItems.unshift({
+        id: manualId,
+        line: updatedLine.name,
+        itemCode: 'VT-Line',
+        title: newIssue.title,
+        description: newIssue.description,
+        severity: newIssue.severity,
+        assignee: updatedLine.leader,
+        assigneeRole: `Line Leader ${updatedLine.name}`,
+        duration: 'Vừa xong',
+        sinceTime: nowTime,
+        statusText: 'Mới tiếp nhận',
+        progress: 10,
+        notes: newIssue.description,
+        isSynced: true,
+        history: [
+          {
+            timestamp: nowTime,
+            progress: 10,
+            statusText: 'Mới tiếp nhận',
+            note: newIssue.description,
+            author: updatedLine.leader,
+          },
+        ],
+      });
+    }
+
+    if (autoStopItems.length > 0) {
+      setIssues((prev) => [...autoStopItems, ...prev]);
+    }
+
+    if (enteredMassStop) {
       pushToast(
-        `Đã cập nhật ${updatedLine.name} & tạo ${newId}`,
+        `Đã cập nhật ${updatedLine.name} & tự động +1 Issue`,
+        `Dừng máy (${updatedLine.statusLabel}) đã được cộng vào Issue (${autoStopItems[0].id}).`,
+        'amber'
+      );
+    } else if (newIssue) {
+      pushToast(
+        `Đã cập nhật ${updatedLine.name} & tạo ${autoStopItems[0].id}`,
         `VT: ${updatedLine.vtPercent}% · Issue: ${updatedLine.issueCount} · ${updatedLine.statusLabel}`
       );
     } else {
@@ -409,6 +585,7 @@ export default function App() {
           selectedLineFilter={selectedLineFilter}
           isAdminMode={isAdminMode}
           onQuickReportLine={(lineId) => setQuickReportLineId(lineId)}
+          onInspectLineIssues={(target) => setInspectIssuesTarget(target)}
           onAdminEditLine={() => {
             if (isAdminMode) {
               setQuickReportLineId(lines[0]?.id || 'line-1');
@@ -518,6 +695,40 @@ export default function App() {
           if (el) el.scrollIntoView({ behavior: 'smooth' });
           pushToast('Lọc theo dây chuyền', `Đang hiển thị sự cố của ${lineName}.`, 'blue');
         }}
+        onInspectLineIssues={(lineId) => setInspectIssuesTarget(lineId)}
+      />
+
+      <LineIssuesModal
+        isOpen={inspectIssuesTarget !== null}
+        targetLine={
+          inspectIssuesTarget && inspectIssuesTarget !== 'HUB'
+            ? lines.find((l) => l.id === inspectIssuesTarget) ?? null
+            : null
+        }
+        isHubMode={inspectIssuesTarget === 'HUB'}
+        issues={issues}
+        onClose={() => setInspectIssuesTarget(null)}
+        onSelectIssueDetail={(issueId) => setEditingIssueId(issueId)}
+        onQuickResolveIssue={(issueId, currentNotes) =>
+          handleSaveIssueProgress(
+            issueId,
+            100,
+            currentNotes || 'Đã khắc phục hoàn toàn 100%.'
+          )
+        }
+        onOpenQuickReport={(lineId) => setQuickReportLineId(lineId)}
+        onFilterInTable={(lineName) => {
+          setSelectedLineFilter(lineName);
+          const el = document.getElementById('line-issues-detail-tracker');
+          if (el) el.scrollIntoView({ behavior: 'smooth' });
+          pushToast(
+            'Lọc bảng sự cố',
+            lineName === 'all'
+              ? 'Đang hiển thị toàn bộ sự cố trên bảng theo dõi.'
+              : `Đang lọc các sự cố của ${lineName}.`,
+            'blue'
+          );
+        }}
       />
 
       {/* Modals */}
@@ -623,6 +834,44 @@ export default function App() {
         onClose={() => setAddLineOpen(false)}
         onCreateLine={(newLine) => {
           setLines((prev) => [...prev, newLine]);
+          if (newLine.characteristic === 'mas' && isMassStopIssueStatus(newLine.statusLabel)) {
+            const stopId = getNextIssueId(issues);
+            const stopNote = `Tự động tạo từ trạng thái dừng máy (${newLine.statusLabel}).`;
+            setIssues((prev) => [
+              {
+                id: stopId,
+                line: newLine.name,
+                itemCode: 'Mass-Stop',
+                title: `Dừng máy: ${newLine.statusLabel}`,
+                description: `Khởi tạo ${newLine.name} (Mass) ở trạng thái dừng máy "${newLine.statusLabel}" — tự động ghi nhận Issue.`,
+                severity:
+                  newLine.statusLabel === 'Dừng do Máy hỏng' ||
+                  newLine.statusLabel === 'Dừng do Lỗi thao tác' ||
+                  newLine.statusLabel === 'Dừng Chất lượng' ||
+                  newLine.statusLabel === 'Dừng do Sự cố điện'
+                    ? 'high'
+                    : 'medium',
+                assignee: newLine.leader,
+                assigneeRole: `Line Leader ${newLine.name}`,
+                duration: 'Vừa xong',
+                sinceTime: 'Vừa tạo',
+                statusText: 'Đang xử lý dừng máy',
+                progress: 10,
+                notes: stopNote,
+                isSynced: true,
+                history: [
+                  {
+                    timestamp: 'Vừa tạo',
+                    progress: 10,
+                    statusText: 'Đang xử lý dừng máy',
+                    note: stopNote,
+                    author: newLine.leader,
+                  },
+                ],
+              },
+              ...prev,
+            ]);
+          }
           pushToast(
             'Khởi tạo dây chuyền mới',
             `Đã thêm ${newLine.name} (${newLine.stage}) vào hệ thống KHV.`

@@ -546,15 +546,22 @@ export function IssuesSection({
                         </span>
                       </td>
                       <td className="py-3 px-4 border-r border-slate-200">
-                        <div className="font-bold text-slate-900">
-                          {issue.isSynced && (
-                            <span className="text-amber-700 font-semibold text-[11px] mr-1.5">
-                              [Tự động đẩy từ {issue.line}]
-                            </span>
-                          )}
-                          <span>{issue.title}</span>
-                        </div>
-                        <div className="text-[11px] text-slate-500 mt-0.5">{issue.description}</div>
+                        <button
+                          type="button"
+                          onClick={() => onOpenIssueDetail(issue.id)}
+                          className="text-left group cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600 rounded"
+                          title="Nhấp để xem chi tiết vấn đề"
+                        >
+                          <div className="font-bold text-slate-900 group-hover:text-blue-700 transition-colors">
+                            {issue.isSynced && (
+                              <span className="text-amber-700 font-semibold text-[11px] mr-1.5">
+                                [Tự động đẩy từ {issue.line}]
+                              </span>
+                            )}
+                            <span>{issue.title}</span>
+                          </div>
+                          <div className="text-[11px] text-slate-500 mt-0.5">{issue.description}</div>
+                        </button>
                       </td>
                       <td className="py-3 px-3 border-r border-slate-200 text-center">
                         {getSeverityBadge(issue.severity)}

@@ -4,20 +4,28 @@ import {
   CheckCircle2,
   ClipboardEdit,
   Filter,
+  KeyRound,
   Lock,
   LockOpen,
-  Minus,
   PackageCheck,
-  Plus,
   Save,
   Settings2,
+  ShieldAlert,
   Trash2,
   UserCheck,
   X,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { addDaysToIso, getTodayIsoDate, isLineCompleted } from '../../data/initialData';
-import { IssueSeverity, LineHealthStatus, ProductionLine } from '../../types/production';
+import { addDaysToIso, formatLineTimestamp, getTodayIsoDate, isLineCompleted } from '../../data/initialData';
+import {
+  isMassStopIssueStatus,
+  IssueSeverity,
+  LineCharacteristic,
+  LineHealthStatus,
+  MASS_LINE_STATUSES,
+  NEW_LINE_STATUSES,
+  ProductionLine,
+} from '../../types/production';
 import { SetupTimelineBar } from '../SetupTimelineBar';
 
 interface LineQuickReportModalProps {
@@ -39,28 +47,8 @@ interface LineQuickReportModalProps {
   ) => void;
   onDeleteLine: (lineId: string) => void;
   onFilterLineIssues: (lineName: string) => void;
+  onInspectLineIssues: (lineId: string) => void;
 }
-
-const STATUS_OPTIONS: LineHealthStatus[] = [
-  'Hoàn thành',
-  'Chạy Tốt',
-  'Đang Setup',
-  'Gần xong',
-  'Chờ Vật Tư',
-  'Đang test',
-  'Chờ xuất',
-  'Đã kích hoạt',
-];
-
-const HEALTH_BADGE_OPTIONS: { label: string; tone: 'emerald' | 'amber' | 'rose' }[] = [
-  { label: 'Ổn định', tone: 'emerald' },
-  { label: 'Tối ưu', tone: 'emerald' },
-  { label: 'Sắp hoàn thành', tone: 'emerald' },
-  { label: 'Gần hoàn thành', tone: 'emerald' },
-  { label: 'Cần bổ sung vật tư', tone: 'amber' },
-  { label: 'Chờ kiểm tra', tone: 'amber' },
-  { label: 'Nút thắt cổ chai', tone: 'rose' },
-];
 
 export function LineQuickReportModal({
   isOpen,
@@ -73,6 +61,7 @@ export function LineQuickReportModal({
   onSaveLineReport,
   onDeleteLine,
   onFilterLineIssues,
+  onInspectLineIssues,
 }: LineQuickReportModalProps) {
   const [selectedId, setSelectedId] = useState<string>(initialLineId || lines[0]?.id || '');
 
@@ -83,15 +72,16 @@ export function LineQuickReportModal({
   const [leader, setLeader] = useState('');
 
   // Operational progress & status fields
+  const [characteristic, setCharacteristic] = useState<LineCharacteristic>('mas');
   const [vtPercent, setVtPercent] = useState(100);
   const [healthPercent, setHealthPercent] = useState(85);
   const [issueCount, setIssueCount] = useState(0);
-  const [statusLabel, setStatusLabel] = useState<LineHealthStatus>('Chạy Tốt');
+  const [statusLabel, setStatusLabel] = useState<LineHealthStatus>('Đủ Vật Tư');
   const [healthBadge, setHealthBadge] = useState('Ổn định');
   const [healthTone, setHealthTone] = useState<'emerald' | 'amber' | 'rose'>('emerald');
   const [note, setNote] = useState('');
 
-  // Setup Timeline 3 milestones (when statusLabel === 'Đang Setup')
+  // Setup Timeline 3 milestones (when New line has not reached Mass Ready)
   const [setupCurrentDate, setSetupCurrentDate] = useState(getTodayIsoDate());
   const [setupTargetDate, setSetupTargetDate] = useState(addDaysToIso(getTodayIsoDate(), 3));
   const [setupExpectedDate, setSetupExpectedDate] = useState(addDaysToIso(getTodayIsoDate(), 5));
@@ -105,17 +95,41 @@ export function LineQuickReportModal({
   // 2-step delete confirm
   const [confirmDelete, setConfirmDelete] = useState(false);
 
+  // Characteristic transition guards (New -> Mass requires password; Mass -> New requires Admin)
+  const [pendingMassPassPrompt, setPendingMassPassPrompt] = useState(false);
+  const [massPassInput, setMassPassInput] = useState('');
+  const [massPassError, setMassPassError] = useState('');
+  const [reverseBlockWarning, setReverseBlockWarning] = useState(false);
+  const [autoStopIssueApplied, setAutoStopIssueApplied] = useState(false);
+  const [vtValidationError, setVtValidationError] = useState('');
+  const [issueValidationError, setIssueValidationError] = useState('');
+
   const loadLineIntoState = (target: ProductionLine) => {
     const today = getTodayIsoDate();
+    const char: LineCharacteristic = target.characteristic || 'mas';
+    const validStatus: LineHealthStatus =
+      char === 'mas'
+        ? MASS_LINE_STATUSES.includes(target.statusLabel)
+          ? target.statusLabel
+          : target.healthTone === 'rose'
+          ? 'Dừng do Máy hỏng'
+          : target.vtPercent < 60
+          ? 'Dừng do Vật liệu'
+          : 'Đang sản xuất'
+        : NEW_LINE_STATUSES.includes(target.statusLabel)
+        ? target.statusLabel
+        : 'Đang Lắp Ráp';
+
     setSelectedId(target.id);
     setLineName(target.name);
     setStage(target.stage);
     setShortStage(target.shortStage);
     setLeader(target.leader);
+    setCharacteristic(char);
     setVtPercent(target.vtPercent);
     setHealthPercent(target.healthPercent);
     setIssueCount(target.issueCount);
-    setStatusLabel(target.statusLabel);
+    setStatusLabel(validStatus);
     setHealthBadge(target.healthBadge);
     setHealthTone(target.healthTone);
     setNote(target.lastNote || '');
@@ -126,6 +140,130 @@ export function LineQuickReportModal({
     setNewIssueTitle('');
     setNewIssueDesc('');
     setConfirmDelete(false);
+    setPendingMassPassPrompt(false);
+    setMassPassInput('');
+    setMassPassError('');
+    setReverseBlockWarning(false);
+    setAutoStopIssueApplied(false);
+    setVtValidationError('');
+    setIssueValidationError('');
+  };
+
+  const getMassStopSeverity = (status: LineHealthStatus): IssueSeverity =>
+    status === 'Dừng do Máy hỏng' ||
+    status === 'Dừng do Lỗi thao tác' ||
+    status === 'Dừng Chất lượng' ||
+    status === 'Dừng do Sự cố điện'
+      ? 'high'
+      : 'medium';
+
+  const syncAutoStopIssue = (
+    nextChar: LineCharacteristic,
+    nextStatus: LineHealthStatus,
+    savedIsMassStop: boolean,
+    savedStatus: LineHealthStatus
+  ) => {
+    const isNextMassStop = nextChar === 'mas' && isMassStopIssueStatus(nextStatus);
+    const shouldHaveAutoPlusOne =
+      isNextMassStop && (!savedIsMassStop || nextStatus !== savedStatus);
+
+    if (shouldHaveAutoPlusOne) {
+      setNewIssueTitle(`Dừng máy: ${nextStatus}`);
+      setNewIssueSeverity(getMassStopSeverity(nextStatus));
+      setNewIssueDesc('');
+      setIssueValidationError('');
+      if (!autoStopIssueApplied) {
+        setIssueCount((c) => c + 1);
+        setAutoStopIssueApplied(true);
+      }
+    } else {
+      if (nextChar === 'mas') {
+        setNewIssueTitle('');
+        setNewIssueDesc('');
+      }
+      setIssueValidationError('');
+      if (autoStopIssueApplied) {
+        setIssueCount((c) => Math.max(0, c - 1));
+        setAutoStopIssueApplied(false);
+      }
+    }
+  };
+
+  const applyCharacteristicSwitch = (
+    nextChar: LineCharacteristic,
+    savedIsMassStop: boolean,
+    savedStatus: LineHealthStatus
+  ) => {
+    setCharacteristic(nextChar);
+    setPendingMassPassPrompt(false);
+    setMassPassInput('');
+    setMassPassError('');
+    setReverseBlockWarning(false);
+
+    let resolvedStatus = statusLabel;
+    if (nextChar === 'mas') {
+      if (!MASS_LINE_STATUSES.includes(statusLabel)) {
+        if (statusLabel === 'Tạm Hoãn' || healthTone === 'rose') {
+          resolvedStatus = 'Dừng do Máy hỏng';
+          setStatusLabel(resolvedStatus);
+          setHealthTone('rose');
+          setHealthBadge('Nút thắt cổ chai');
+        } else if (statusLabel === 'Chờ Vật Tư') {
+          resolvedStatus = 'Dừng do Vật liệu';
+          setStatusLabel(resolvedStatus);
+          setHealthTone('amber');
+          setHealthBadge('Cần bổ sung vật tư');
+        } else {
+          resolvedStatus = 'Đang sản xuất';
+          setStatusLabel(resolvedStatus);
+          setHealthTone('emerald');
+          setHealthBadge('Ổn định');
+        }
+      }
+    } else if (!NEW_LINE_STATUSES.includes(statusLabel)) {
+      if (
+        statusLabel === 'Dừng do Máy hỏng' ||
+        statusLabel === 'Dừng do Lỗi thao tác' ||
+        statusLabel === 'Dừng Chất lượng' ||
+        statusLabel === 'Dừng do Sự cố điện'
+      ) {
+        resolvedStatus = 'Tạm Hoãn';
+        setStatusLabel(resolvedStatus);
+        setHealthTone('rose');
+        setHealthBadge('Nút thắt cổ chai');
+      } else if (statusLabel === 'Dừng do Vật liệu') {
+        resolvedStatus = 'Chờ Vật Tư';
+        setStatusLabel(resolvedStatus);
+        setHealthTone('amber');
+        setHealthBadge('Cần bổ sung vật tư');
+      } else if (
+        statusLabel === 'Dừng do Thiếu người' ||
+        statusLabel === 'Dừng Bảo dưỡng' ||
+        statusLabel === 'Dừng Vệ Sinh' ||
+        statusLabel === 'Dừng do Lỗi khác' ||
+        statusLabel === 'Dừng do Hết Plan'
+      ) {
+        resolvedStatus = 'Test Lại';
+        setStatusLabel(resolvedStatus);
+        setHealthTone('amber');
+        setHealthBadge('Chờ kiểm tra');
+      } else if (statusLabel === 'Dừng hoàn thành Plan') {
+        resolvedStatus = 'Mass Ready';
+        setStatusLabel(resolvedStatus);
+        setHealthTone('emerald');
+        setHealthBadge('Ổn định');
+      } else {
+        resolvedStatus = 'Chạy thử';
+        setStatusLabel(resolvedStatus);
+        setHealthTone('emerald');
+        setHealthBadge('Sắp hoàn thành');
+      }
+    }
+    if (nextChar === 'mas') {
+      setVtPercent(100);
+      setVtValidationError('');
+    }
+    syncAutoStopIssue(nextChar, resolvedStatus, savedIsMassStop, savedStatus);
   };
 
   useEffect(() => {
@@ -133,6 +271,12 @@ export function LineQuickReportModal({
     const target = lines.find((l) => l.id === (initialLineId || selectedId)) || lines[0];
     if (target) loadLineIntoState(target);
   }, [isOpen, initialLineId]);
+
+  useEffect(() => {
+    if (isAdminMode) {
+      setReverseBlockWarning(false);
+    }
+  }, [isAdminMode]);
 
   const handleSwitchLine = (lineId: string) => {
     const target = lines.find((l) => l.id === lineId);
@@ -148,12 +292,84 @@ export function LineQuickReportModal({
     lineName.trim() !== activeLine.name ||
     stage.trim() !== activeLine.stage ||
     shortStage.trim() !== activeLine.shortStage ||
-    leader.trim() !== activeLine.leader;
+    leader.trim() !== activeLine.leader ||
+    characteristic !== activeLine.characteristic;
+
+  const isSavedMassLocked = activeLine.characteristic === 'mas' && !isAdminMode;
+  const wasInitiallyMassStop =
+    activeLine.characteristic === 'mas' && isMassStopIssueStatus(activeLine.statusLabel);
+
+  const handleClickNewButton = () => {
+    if (characteristic === 'new') return;
+    if (activeLine.characteristic === 'mas' && !isAdminMode) {
+      setReverseBlockWarning(true);
+      setPendingMassPassPrompt(false);
+      return;
+    }
+    applyCharacteristicSwitch('new', wasInitiallyMassStop, activeLine.statusLabel);
+  };
+
+  const handleClickMassButton = () => {
+    if (characteristic === 'mas') return;
+    setReverseBlockWarning(false);
+    setPendingMassPassPrompt(true);
+    setMassPassInput('');
+    setMassPassError('');
+  };
+
+  const handleConfirmMassPassword = () => {
+    if (!massPassInput.trim()) {
+      setMassPassError('Vui lòng nhập mật khẩu xác nhận để chuyển từ Test thử sang Mass.');
+      return;
+    }
+    applyCharacteristicSwitch('mas', wasInitiallyMassStop, activeLine.statusLabel);
+  };
+
+  const requiresFullMaterial =
+    statusLabel === 'Mass Ready' ||
+    statusLabel === 'Đủ Vật Tư' ||
+    statusLabel === 'Dừng hoàn thành Plan';
+
+  const isAutoMassStopIssue =
+    characteristic === 'mas' && autoStopIssueApplied && isMassStopIssueStatus(statusLabel);
+  const requiresIssueDeclaration =
+    isAutoMassStopIssue || (characteristic === 'new' && addNewIssue);
+  const isIssueDeclarationComplete =
+    !requiresIssueDeclaration ||
+    (newIssueTitle.trim().length > 0 && newIssueDesc.trim().length > 0);
+  const canSubmitReport =
+    (!requiresFullMaterial || vtPercent >= 100) && isIssueDeclarationComplete;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const shouldCreateIssue = addNewIssue && newIssueTitle.trim().length > 0;
-    const finalIssueCount = shouldCreateIssue ? issueCount + 1 : issueCount;
+    if (requiresFullMaterial && vtPercent < 100) {
+      setVtValidationError(
+        `Trạng thái "${statusLabel}" yêu cầu Tiến độ Vật Tư đạt 100% (hiện tại đang là ${vtPercent}%). Vui lòng cập nhật Vật Tư lên 100% hoặc đổi sang trạng thái phù hợp.`
+      );
+      return;
+    }
+    setVtValidationError('');
+
+    if (requiresIssueDeclaration && !isIssueDeclarationComplete) {
+      setIssueValidationError(
+        'Khi đã khai báo dừng máy (có Issue), bắt buộc phải nhập đầy đủ Tiêu đề và Mô tả chi tiết Issue mới được lưu.'
+      );
+      if (!newIssueTitle.trim()) {
+        document.getElementById('quick-report-issue-title')?.focus();
+      } else {
+        document.getElementById('quick-report-issue-desc')?.focus();
+      }
+      return;
+    }
+    setIssueValidationError('');
+
+    const safeCharacteristic: LineCharacteristic =
+      activeLine.characteristic === 'mas' && !isAdminMode ? 'mas' : characteristic;
+    const isFinalAutoMassStopIssue =
+      safeCharacteristic === 'mas' && autoStopIssueApplied && isMassStopIssueStatus(statusLabel);
+    const shouldCreateManualIssue =
+      safeCharacteristic === 'new' && addNewIssue && newIssueTitle.trim().length > 0;
+    const finalIssueCount = shouldCreateManualIssue ? issueCount + 1 : issueCount;
 
     const updatedLine: ProductionLine = {
       ...activeLine,
@@ -161,6 +377,7 @@ export function LineQuickReportModal({
       stage: isAdminMode && stage.trim() ? stage.trim() : activeLine.stage,
       shortStage: isAdminMode && shortStage.trim() ? shortStage.trim() : activeLine.shortStage,
       leader: isAdminMode && leader.trim() ? leader.trim() : activeLine.leader,
+      characteristic: safeCharacteristic,
       vtPercent,
       healthPercent,
       issueCount: finalIssueCount,
@@ -168,7 +385,7 @@ export function LineQuickReportModal({
       healthBadge,
       healthTone,
       lastNote: note.trim() || undefined,
-      updatedAt: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+      updatedAt: formatLineTimestamp(),
       setupTimeline: {
         currentDate: setupCurrentDate || getTodayIsoDate(),
         targetDate: setupTargetDate || addDaysToIso(getTodayIsoDate(), 3),
@@ -176,17 +393,23 @@ export function LineQuickReportModal({
       },
     };
 
+    const issuePayload = isFinalAutoMassStopIssue
+      ? {
+          title: newIssueTitle.trim(),
+          severity: newIssueSeverity,
+          description: newIssueDesc.trim(),
+        }
+      : shouldCreateManualIssue
+      ? {
+          title: newIssueTitle.trim(),
+          severity: newIssueSeverity,
+          description: newIssueDesc.trim(),
+        }
+      : undefined;
+
     onSaveLineReport(
       updatedLine,
-      shouldCreateIssue
-        ? {
-            title: newIssueTitle.trim(),
-            severity: newIssueSeverity,
-            description:
-              newIssueDesc.trim() ||
-              `Báo cáo nhanh từ sơ đồ điều phối ${updatedLine.name} (${updatedLine.stage}).`,
-          }
-        : undefined,
+      issuePayload,
       isAdminMode && hasStructuralChanges
     );
     onClose();
@@ -206,6 +429,15 @@ export function LineQuickReportModal({
                 <h3 className="text-base font-bold text-white">
                   Quản Lý &amp; Báo Cáo Nhanh Line ({activeLine.name})
                 </h3>
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-extrabold ${
+                    characteristic === 'new'
+                      ? 'bg-violet-200 text-violet-950'
+                      : 'bg-sky-200 text-sky-950'
+                  }`}
+                >
+                  {characteristic === 'new' ? 'New · Test model mới' : 'Mass · SX hàng loạt'}
+                </span>
                 {isAdminMode && (
                   <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-400 text-slate-900">
                     Admin Mode
@@ -256,11 +488,13 @@ export function LineQuickReportModal({
           })}
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 overflow-y-auto flex-1 space-y-5 text-xs">
+        <form noValidate onSubmit={handleSubmit} className="p-6 overflow-y-auto flex-1 space-y-5 text-xs">
           {/* Top Summary Preview */}
           {(() => {
             const effectiveIssues =
-              addNewIssue && newIssueTitle.trim() ? issueCount + 1 : issueCount;
+              characteristic === 'new' && addNewIssue && newIssueTitle.trim()
+                ? issueCount + 1
+                : issueCount;
             const vtCardClass =
               vtPercent >= 80
                 ? 'bg-emerald-50/80 border-emerald-300 text-emerald-700'
@@ -274,16 +508,27 @@ export function LineQuickReportModal({
                 ? 'bg-amber-50/80 border-amber-300 text-amber-700'
                 : 'bg-rose-50/80 border-rose-300 text-rose-700';
             const statusCardClass =
+              statusLabel === 'Dừng do Máy hỏng' ||
+              statusLabel === 'Dừng do Lỗi thao tác' ||
+              statusLabel === 'Dừng Chất lượng' ||
+              statusLabel === 'Dừng do Sự cố điện' ||
+              statusLabel === 'Tạm Hoãn' ||
               healthTone === 'rose'
                 ? 'bg-rose-50/80 border-rose-300'
                 : healthTone === 'amber' ||
+                  statusLabel === 'Dừng do Vật liệu' ||
+                  statusLabel === 'Dừng do Thiếu người' ||
+                  statusLabel === 'Dừng Bảo dưỡng' ||
+                  statusLabel === 'Dừng Vệ Sinh' ||
+                  statusLabel === 'Dừng do Lỗi khác' ||
+                  statusLabel === 'Dừng do Hết Plan' ||
                   statusLabel === 'Chờ Vật Tư' ||
-                  statusLabel === 'Đang Setup' ||
-                  statusLabel === 'Đang test' ||
-                  statusLabel === 'Chờ xuất'
+                  statusLabel === 'Đang Lắp Ráp' ||
+                  statusLabel === 'Đang cài đặt' ||
+                  statusLabel === 'Test Lại'
                 ? 'bg-amber-50/80 border-amber-300'
-                : statusLabel === 'Gần xong'
-                ? 'bg-blue-50/80 border-blue-300'
+                : statusLabel === 'Chạy thử'
+                ? 'bg-cyan-50/80 border-cyan-300'
                 : 'bg-emerald-50/80 border-emerald-300';
 
             return (
@@ -300,17 +545,32 @@ export function LineQuickReportModal({
                   <PackageCheck className="w-5 h-5" />
                 </div>
 
-                <div className={`border rounded-xl p-3 flex items-center justify-between ${issueCardClass}`}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onInspectLineIssues(activeLine.id);
+                  }}
+                  title="Nhấp để xem chi tiết vấn đề của Line này"
+                  className={`border rounded-xl p-3 flex items-center justify-between text-left transition hover:ring-2 hover:ring-rose-300 cursor-pointer ${issueCardClass}`}
+                >
                   <div>
                     <span className="text-[11px] text-slate-600 font-medium block">
-                      Số Issue trên Line
+                      Số Issue trên Line (Nhấp xem)
                     </span>
-                    <span className="text-xl font-extrabold tabular-nums">
-                      {effectiveIssues}
-                    </span>
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-xl font-extrabold tabular-nums">
+                        {effectiveIssues}
+                      </span>
+                      {autoStopIssueApplied && (
+                        <span className="text-[10px] font-bold text-rose-700">
+                          (+1 chờ lưu)
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <AlertTriangle className="w-5 h-5" />
-                </div>
+                </button>
 
                 <div className={`border rounded-xl p-3 flex items-center justify-between ${statusCardClass}`}>
                   <div>
@@ -323,16 +583,27 @@ export function LineQuickReportModal({
                   </div>
                   <CheckCircle2
                     className={`w-5 h-5 ${
+                      statusLabel === 'Dừng do Máy hỏng' ||
+                      statusLabel === 'Dừng do Lỗi thao tác' ||
+                      statusLabel === 'Dừng Chất lượng' ||
+                      statusLabel === 'Dừng do Sự cố điện' ||
+                      statusLabel === 'Tạm Hoãn' ||
                       healthTone === 'rose'
                         ? 'text-rose-600'
                         : healthTone === 'amber' ||
+                          statusLabel === 'Dừng do Vật liệu' ||
+                          statusLabel === 'Dừng do Thiếu người' ||
+                          statusLabel === 'Dừng Bảo dưỡng' ||
+                          statusLabel === 'Dừng Vệ Sinh' ||
+                          statusLabel === 'Dừng do Lỗi khác' ||
+                          statusLabel === 'Dừng do Hết Plan' ||
                           statusLabel === 'Chờ Vật Tư' ||
-                          statusLabel === 'Đang Setup' ||
-                          statusLabel === 'Đang test' ||
-                          statusLabel === 'Chờ xuất'
+                          statusLabel === 'Đang Lắp Ráp' ||
+                          statusLabel === 'Đang cài đặt' ||
+                          statusLabel === 'Test Lại'
                         ? 'text-amber-600'
-                        : statusLabel === 'Gần xong'
-                        ? 'text-blue-600'
+                        : statusLabel === 'Chạy thử'
+                        ? 'text-cyan-600'
                         : 'text-emerald-600'
                     }`}
                   />
@@ -340,6 +611,195 @@ export function LineQuickReportModal({
               </div>
             );
           })()}
+
+          {/* Line Characteristic Selector (New -> Mass one-way, Mass -> New requires Admin) */}
+          <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-2.5">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="font-bold text-slate-900">
+                Đặc Tính Line (New / Mass)
+              </span>
+              <span className="text-[11px] text-slate-500">
+                Chỉ chuyển 1 chiều <strong className="text-slate-700">New → Mass</strong> (cần mật khẩu) · Chuyển ngược cần quyền Admin
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={handleClickNewButton}
+                title={
+                  isSavedMassLocked
+                    ? 'Không có chiều chuyển ngược từ Mass về New — Chỉ Admin mới được chuyển ngược'
+                    : 'Chọn chế độ New — Test thử model mới'
+                }
+                className={`p-3 rounded-xl border-2 text-left transition flex items-start justify-between gap-2 ${
+                  characteristic === 'new'
+                    ? 'border-violet-500 bg-violet-50/80 shadow-xs cursor-pointer'
+                    : isSavedMassLocked
+                    ? 'border-slate-200 bg-slate-100/80 opacity-75 cursor-not-allowed'
+                    : 'border-slate-200 bg-slate-50/50 hover:border-violet-300 cursor-pointer'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-2 py-0.5 rounded bg-violet-600 text-white text-[10px] font-extrabold uppercase">
+                      New
+                    </span>
+                    <span className="font-bold text-slate-900">Test thử model mới</span>
+                    {isSavedMassLocked && (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-100 border border-amber-300 text-amber-800 text-[10px] font-bold">
+                        <Lock className="w-2.5 h-2.5" />
+                        <span>Chỉ Admin</span>
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-600 mt-1">
+                    Line đang chạy thử nghiệm, kiểm tra và hiệu chỉnh cho model sản phẩm mới.
+                  </p>
+                </div>
+                <span
+                  className={`w-4 h-4 rounded-full border-2 mt-0.5 shrink-0 ${
+                    characteristic === 'new'
+                      ? 'border-violet-600 bg-violet-600 shadow-[inset_0_0_0_3px_white]'
+                      : 'border-slate-300 bg-white'
+                  }`}
+                />
+              </button>
+
+              <button
+                type="button"
+                onClick={handleClickMassButton}
+                title={
+                  characteristic === 'new'
+                    ? 'Nhấp để chuyển từ Test thử (New) sang Mass (yêu cầu nhập mật khẩu)'
+                    : 'Đang ở chế độ sản xuất hàng loạt (Mass)'
+                }
+                className={`p-3 rounded-xl border-2 text-left transition cursor-pointer flex items-start justify-between gap-2 ${
+                  characteristic === 'mas'
+                    ? 'border-sky-500 bg-sky-50/80 shadow-xs'
+                    : pendingMassPassPrompt
+                    ? 'border-sky-400 bg-sky-50/50 ring-2 ring-sky-200'
+                    : 'border-slate-200 bg-slate-50/50 hover:border-sky-300'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-2 py-0.5 rounded bg-sky-600 text-white text-[10px] font-extrabold uppercase">
+                      Mass
+                    </span>
+                    <span className="font-bold text-slate-900">Sản xuất hàng loạt</span>
+                    {characteristic === 'new' && (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-sky-100 border border-sky-300 text-sky-800 text-[10px] font-bold">
+                        <KeyRound className="w-2.5 h-2.5" />
+                        <span>Cần Pass</span>
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-600 mt-1">
+                    Line đã chuẩn hóa quy trình và đi vào vận hành sản xuất hàng loạt (Mass Production).
+                  </p>
+                </div>
+                <span
+                  className={`w-4 h-4 rounded-full border-2 mt-0.5 shrink-0 ${
+                    characteristic === 'mas'
+                      ? 'border-sky-600 bg-sky-600 shadow-[inset_0_0_0_3px_white]'
+                      : 'border-slate-300 bg-white'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {pendingMassPassPrompt && (
+              <div className="rounded-xl border-2 border-sky-300 bg-sky-50/80 p-3.5 space-y-2.5">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2 text-sky-900 font-bold">
+                    <KeyRound className="w-4 h-4 text-sky-600 shrink-0" />
+                    <span>Nhập mật khẩu xác nhận chuyển từ Test thử (New) → Mass</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPendingMassPassPrompt(false);
+                      setMassPassInput('');
+                      setMassPassError('');
+                    }}
+                    className="text-slate-400 hover:text-slate-700 cursor-pointer"
+                    aria-label="Đóng khung nhập mật khẩu"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-600">
+                  Lưu ý: Sau khi lưu sang <strong>Mass</strong>, thao tác chuyển ngược về <strong>New</strong> sẽ bị khóa và chỉ Admin mới có quyền đổi lại.
+                </p>
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <input
+                    type="password"
+                    autoFocus
+                    value={massPassInput}
+                    onChange={(e) => {
+                      setMassPassInput(e.target.value);
+                      if (massPassError) setMassPassError('');
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleConfirmMassPassword();
+                      }
+                    }}
+                    placeholder="Nhập mật khẩu xác nhận (VD: admin123)"
+                    className="flex-1 rounded-lg border border-sky-300 bg-white px-3 py-1.5 text-xs focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPendingMassPassPrompt(false);
+                        setMassPassInput('');
+                        setMassPassError('');
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-600 font-semibold hover:bg-slate-100 cursor-pointer"
+                    >
+                      Hủy
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleConfirmMassPassword}
+                      className="px-3.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold shadow-xs cursor-pointer whitespace-nowrap"
+                    >
+                      Xác nhận chuyển Mass
+                    </button>
+                  </div>
+                </div>
+                {massPassError && (
+                  <p className="text-[11px] font-semibold text-rose-600">{massPassError}</p>
+                )}
+              </div>
+            )}
+
+            {reverseBlockWarning && (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <div className="flex items-start gap-2 text-amber-900">
+                  <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold block">
+                      Không thể chuyển ngược từ Mass về Test thử (New)
+                    </span>
+                    <span className="text-[11px] text-amber-800">
+                      Chỉ chuyển 1 chiều New → Mass. Muốn đổi ngược từ Mass về New phải xác thực quyền Admin.
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={onRequestAdminAuth}
+                  className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-xs cursor-pointer"
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>Mở khóa Admin</span>
+                </button>
+              </div>
+            )}
+          </div>
 
           {/* Admin Line Configuration Block */}
           <div
@@ -511,7 +971,11 @@ export function LineQuickReportModal({
                 min={0}
                 max={100}
                 value={vtPercent}
-                onChange={(e) => setVtPercent(Number(e.target.value))}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setVtPercent(val);
+                  if (val >= 100) setVtValidationError('');
+                }}
                 className="w-full accent-blue-600 cursor-pointer"
               />
               <div className="flex items-center justify-between gap-2">
@@ -520,7 +984,10 @@ export function LineQuickReportModal({
                     <button
                       key={preset}
                       type="button"
-                      onClick={() => setVtPercent(preset)}
+                      onClick={() => {
+                        setVtPercent(preset);
+                        if (preset >= 100) setVtValidationError('');
+                      }}
                       className={`px-2 py-1 rounded text-[11px] font-semibold border cursor-pointer tabular-nums ${
                         vtPercent === preset
                           ? 'bg-blue-600 text-white border-blue-600'
@@ -536,12 +1003,19 @@ export function LineQuickReportModal({
                   min={0}
                   max={100}
                   value={vtPercent}
-                  onChange={(e) =>
-                    setVtPercent(Math.min(100, Math.max(0, Number(e.target.value) || 0)))
-                  }
+                  onChange={(e) => {
+                    const val = Math.min(100, Math.max(0, Number(e.target.value) || 0));
+                    setVtPercent(val);
+                    if (val >= 100) setVtValidationError('');
+                  }}
                   className="w-16 text-right px-2 py-1 border border-slate-300 rounded font-bold tabular-nums"
                 />
               </div>
+              {requiresFullMaterial && vtPercent < 100 && (
+                <p className="text-[11px] font-bold text-rose-600">
+                  Trạng thái &ldquo;{statusLabel}&rdquo; yêu cầu Vật Tư đạt 100% mới hợp lệ.
+                </p>
+              )}
             </div>
 
             <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-3">
@@ -579,107 +1053,107 @@ export function LineQuickReportModal({
             </div>
           </div>
 
-          {/* 2. Overall Line Status & Issue Count */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <label className="block font-bold text-slate-700 mb-1.5">
-                Trạng thái vận hành trên sơ đồ
-              </label>
-              <select
-                value={statusLabel}
-                onChange={(e) => {
-                  const nextStatus = e.target.value as LineHealthStatus;
-                  setStatusLabel(nextStatus);
-                  if (
-                    nextStatus === 'Hoàn thành' ||
-                    nextStatus === 'Chạy Tốt' ||
-                    nextStatus === 'Đã kích hoạt'
-                  ) {
-                    setHealthTone('emerald');
-                    setHealthBadge('Ổn định');
-                  } else if (nextStatus === 'Gần xong') {
-                    setHealthTone('emerald');
-                    setHealthBadge('Sắp hoàn thành');
-                  } else if (nextStatus === 'Chờ Vật Tư') {
-                    setHealthTone('amber');
-                    setHealthBadge('Cần bổ sung vật tư');
-                  } else if (nextStatus === 'Đang test' || nextStatus === 'Chờ xuất') {
-                    setHealthTone('amber');
-                    setHealthBadge('Chờ kiểm tra');
-                  } else if (nextStatus === 'Đang Setup' && healthTone === 'emerald') {
-                    setHealthTone('amber');
-                    setHealthBadge('Chờ kiểm tra');
-                  }
-                }}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 bg-white font-semibold text-slate-800"
-              >
-                {STATUS_OPTIONS.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block font-bold text-slate-700 mb-1.5">
-                Đánh giá tổng quan Line
-              </label>
-              <select
-                value={healthBadge}
-                onChange={(e) => {
-                  const chosen = HEALTH_BADGE_OPTIONS.find((o) => o.label === e.target.value);
-                  setHealthBadge(e.target.value);
-                  if (chosen) setHealthTone(chosen.tone);
-                }}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 bg-white font-semibold text-slate-800"
-              >
-                {HEALTH_BADGE_OPTIONS.map((opt) => (
-                  <option key={opt.label} value={opt.label}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block font-bold text-slate-700 mb-1.5">
-                Số lượng Issue hiện tại (IS)
-              </label>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIssueCount((c) => Math.max(0, c - 1))}
-                  className="w-9 h-9 rounded-lg border border-slate-300 bg-slate-50 hover:bg-slate-100 flex items-center justify-center cursor-pointer"
-                >
-                  <Minus className="w-4 h-4 text-slate-700" />
-                </button>
-                <input
-                  type="number"
-                  min={0}
-                  value={issueCount}
-                  onChange={(e) => setIssueCount(Math.max(0, Number(e.target.value) || 0))}
-                  className="flex-1 text-center py-2 border border-slate-300 rounded-lg font-extrabold text-slate-900 tabular-nums"
-                />
-                <button
-                  type="button"
-                  onClick={() => setIssueCount((c) => c + 1)}
-                  className="w-9 h-9 rounded-lg border border-slate-300 bg-slate-50 hover:bg-slate-100 flex items-center justify-center cursor-pointer"
-                >
-                  <Plus className="w-4 h-4 text-slate-700" />
-                </button>
+          {/* 2. Overall Line Status */}
+          <div>
+            <label className="block font-bold text-slate-700 mb-1.5">
+              Trạng thái vận hành trên sơ đồ
+            </label>
+            <select
+              value={statusLabel}
+              onChange={(e) => {
+                const nextStatus = e.target.value as LineHealthStatus;
+                setStatusLabel(nextStatus);
+                syncAutoStopIssue(
+                  characteristic,
+                  nextStatus,
+                  wasInitiallyMassStop,
+                  activeLine.statusLabel
+                );
+                if (
+                  nextStatus === 'Mass Ready' ||
+                  nextStatus === 'Đủ Vật Tư' ||
+                  nextStatus === 'Dừng hoàn thành Plan'
+                ) {
+                  setVtPercent(100);
+                  setVtValidationError('');
+                } else if (nextStatus === 'Đang sản xuất' && vtPercent < 100) {
+                  setVtPercent(100);
+                  setVtValidationError('');
+                }
+                if (
+                  nextStatus === 'Đang sản xuất' ||
+                  nextStatus === 'Dừng hoàn thành Plan' ||
+                  nextStatus === 'Mass Ready' ||
+                  nextStatus === 'Đủ Vật Tư'
+                ) {
+                  setHealthTone('emerald');
+                  setHealthBadge('Ổn định');
+                } else if (
+                  nextStatus === 'Dừng do Máy hỏng' ||
+                  nextStatus === 'Dừng do Lỗi thao tác' ||
+                  nextStatus === 'Dừng Chất lượng' ||
+                  nextStatus === 'Dừng do Sự cố điện' ||
+                  nextStatus === 'Tạm Hoãn'
+                ) {
+                  setHealthTone('rose');
+                  setHealthBadge('Nút thắt cổ chai');
+                } else if (nextStatus === 'Dừng do Vật liệu' || nextStatus === 'Chờ Vật Tư') {
+                  setHealthTone('amber');
+                  setHealthBadge('Cần bổ sung vật tư');
+                } else if (nextStatus === 'Dừng do Hết Plan') {
+                  setHealthTone('amber');
+                  setHealthBadge('Chờ kế hoạch');
+                } else if (
+                  nextStatus === 'Dừng do Thiếu người' ||
+                  nextStatus === 'Dừng Bảo dưỡng' ||
+                  nextStatus === 'Dừng Vệ Sinh' ||
+                  nextStatus === 'Dừng do Lỗi khác' ||
+                  nextStatus === 'Đang Lắp Ráp' ||
+                  nextStatus === 'Đang cài đặt' ||
+                  nextStatus === 'Test Lại'
+                ) {
+                  setHealthTone('amber');
+                  setHealthBadge('Chờ kiểm tra');
+                } else if (nextStatus === 'Chạy thử') {
+                  setHealthTone('emerald');
+                  setHealthBadge('Sắp hoàn thành');
+                }
+              }}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 bg-white font-semibold text-slate-800"
+            >
+              {(characteristic === 'mas' ? MASS_LINE_STATUSES : NEW_LINE_STATUSES).map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+            {characteristic === 'mas' && (
+              <div className="mt-1.5 space-y-1">
+                <p className="text-[10px] text-sky-700 font-medium">
+                  Line Mass: mọi trạng thái dừng máy (trừ Dừng hoàn thành Plan) tự động tính +1 Issue.
+                </p>
+                {autoStopIssueApplied && isMassStopIssueStatus(statusLabel) && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-rose-100 border border-rose-200 text-rose-800 text-[10px] font-bold">
+                    <AlertTriangle className="w-3 h-3 shrink-0" />
+                    <span>Đã tự động +1 Issue ({statusLabel}) — Bấm Lưu để cập nhật</span>
+                  </span>
+                )}
               </div>
-            </div>
+            )}
           </div>
 
           {/* 2b. Timeline Section for All Lines */}
           {(() => {
-            const completed = isLineCompleted({
-              statusLabel,
-              vtPercent,
-              healthPercent,
-              issueCount,
-            });
+            const isMassLine = characteristic === 'mas';
+            const isSetupDone = isMassLine || statusLabel === 'Mass Ready';
+            const completed =
+              isSetupDone ||
+              isLineCompleted({
+                statusLabel,
+                vtPercent,
+                healthPercent,
+                issueCount,
+              });
 
             if (completed) {
               return (
@@ -687,10 +1161,17 @@ export function LineQuickReportModal({
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-600 text-white font-bold text-xs">
                       <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>{lineName || activeLine.name} · Hoàn thành</span>
+                      <span>
+                        {lineName || activeLine.name} ·{' '}
+                        {isSetupDone ? 'Setup hoàn thành' : 'Hoàn thành'}
+                      </span>
                     </span>
                     <span className="text-[11px] font-semibold text-emerald-700">
-                      Tự động chuyển màu xanh hoàn thành (100% tiến độ đạt chuẩn)
+                      {isMassLine
+                        ? 'Line đã chuyển sang Mass — thanh timeline tự động chuyển thành Setup hoàn thành'
+                        : isSetupDone
+                        ? 'New model đã chọn Mass Ready — thanh timeline chuyển sang Setup hoàn thành'
+                        : 'Tự động chuyển màu xanh hoàn thành (100% tiến độ đạt chuẩn)'}
                     </span>
                   </div>
                   <div className="h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.45)]" />
@@ -741,63 +1222,225 @@ export function LineQuickReportModal({
             />
           </div>
 
-          {/* 4. Optional Quick Issue Log */}
-          <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/70 space-y-3">
-            <label className="flex items-center justify-between cursor-pointer">
-              <span className="font-bold text-slate-900 inline-flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-rose-600" />
-                <span>Ghi nhận thêm Issue mới vào Bảng Theo Dõi Sự Cố</span>
-              </span>
-              <input
-                type="checkbox"
-                checked={addNewIssue}
-                onChange={(e) => setAddNewIssue(e.target.checked)}
-                className="w-4 h-4 accent-rose-600 cursor-pointer"
-              />
-            </label>
-
-            {addNewIssue && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-slate-200">
-                <div className="sm:col-span-2">
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Tiêu đề sự cố phát sinh *
-                  </label>
-                  <input
-                    required
-                    type="text"
-                    value={newIssueTitle}
-                    onChange={(e) => setNewIssueTitle(e.target.value)}
-                    placeholder={`VD: Thiếu vật tư tại ${lineName || activeLine.name}...`}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 bg-white"
+          {/* 4. Quick Issue Log (Auto-generated for Mass Stop, Manual for New) */}
+          {characteristic === 'mas' ? (
+            <div
+              className={`border rounded-xl p-4 space-y-3 ${
+                autoStopIssueApplied && isMassStopIssueStatus(statusLabel)
+                  ? 'border-rose-300 bg-rose-50/60'
+                  : 'border-slate-200 bg-slate-50/70'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="font-bold text-slate-900 inline-flex items-center gap-2">
+                  <AlertTriangle
+                    className={`w-4 h-4 ${
+                      isMassStopIssueStatus(statusLabel) ? 'text-rose-600' : 'text-slate-500'
+                    }`}
                   />
-                </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Mức độ</label>
-                  <select
-                    value={newIssueSeverity}
-                    onChange={(e) => setNewIssueSeverity(e.target.value as IssueSeverity)}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 bg-white font-semibold"
-                  >
-                    <option value="high">Khẩn cấp (High)</option>
-                    <option value="medium">Trung bình (Medium)</option>
-                    <option value="low">Thấp (Low)</option>
-                  </select>
-                </div>
-                <div className="sm:col-span-3">
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Mô tả &amp; đề xuất xử lý
-                  </label>
-                  <textarea
-                    rows={2}
-                    value={newIssueDesc}
-                    onChange={(e) => setNewIssueDesc(e.target.value)}
-                    placeholder="Chi tiết ảnh hưởng đến tiến độ dây chuyền..."
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 bg-white"
-                  />
-                </div>
+                  <span>Ghi nhận Issue mới vào Bảng Theo Dõi Sự Cố (Tự động cho Line Mass)</span>
+                </span>
+                {autoStopIssueApplied && isMassStopIssueStatus(statusLabel) ? (
+                  <span className="px-2 py-0.5 rounded bg-rose-600 text-white text-[10px] font-bold">
+                    Tự động sinh +1 Issue
+                  </span>
+                ) : isMassStopIssueStatus(statusLabel) ? (
+                  <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 text-[10px] font-bold">
+                    Đã ghi nhận trạng thái dừng hiện tại
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                    Không phát sinh Issue
+                  </span>
+                )}
               </div>
-            )}
-          </div>
+
+              {autoStopIssueApplied && isMassStopIssueStatus(statusLabel) ? (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-rose-200">
+                  <div className="sm:col-span-2">
+                    <label
+                      htmlFor="quick-report-issue-title"
+                      className="block font-semibold text-slate-700 mb-1"
+                    >
+                      Tiêu đề sự cố tự động sinh <span className="text-rose-600">*</span>
+                    </label>
+                    <input
+                      id="quick-report-issue-title"
+                      type="text"
+                      value={newIssueTitle}
+                      onChange={(e) => {
+                        setNewIssueTitle(e.target.value);
+                        if (issueValidationError && e.target.value.trim() && newIssueDesc.trim()) {
+                          setIssueValidationError('');
+                        }
+                      }}
+                      placeholder={`VD: ${statusLabel} — Nêu ngắn gọn sự cố...`}
+                      className={`w-full rounded-lg border px-3 py-2 bg-white font-semibold focus:outline-none focus:ring-2 ${
+                        issueValidationError && !newIssueTitle.trim()
+                          ? 'border-rose-500 focus:ring-rose-500'
+                          : 'border-rose-300 focus:ring-rose-400'
+                      }`}
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Mức độ</label>
+                    <select
+                      value={newIssueSeverity}
+                      onChange={(e) => setNewIssueSeverity(e.target.value as IssueSeverity)}
+                      className="w-full rounded-lg border border-rose-300 px-3 py-2 bg-white font-semibold"
+                    >
+                      <option value="high">Khẩn cấp (High)</option>
+                      <option value="medium">Trung bình (Medium)</option>
+                      <option value="low">Thấp (Low)</option>
+                    </select>
+                  </div>
+                  <div className="sm:col-span-3">
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <label
+                        htmlFor="quick-report-issue-desc"
+                        className="block font-semibold text-slate-700"
+                      >
+                        Mô tả &amp; chi tiết sự cố dừng máy <span className="text-rose-600">*</span>
+                      </label>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                          newIssueDesc.trim()
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : 'bg-rose-100 text-rose-700'
+                        }`}
+                      >
+                        {newIssueDesc.trim() ? 'Đã khai báo Issue' : 'Bắt buộc khai báo'}
+                      </span>
+                    </div>
+                    <textarea
+                      id="quick-report-issue-desc"
+                      rows={2}
+                      value={newIssueDesc}
+                      onChange={(e) => {
+                        setNewIssueDesc(e.target.value);
+                        if (issueValidationError && e.target.value.trim() && newIssueTitle.trim()) {
+                          setIssueValidationError('');
+                        }
+                      }}
+                      placeholder="Bắt buộc nhập chi tiết nguyên nhân dừng máy & hướng xử lý trước khi lưu..."
+                      className={`w-full rounded-lg border px-3 py-2 bg-white focus:outline-none focus:ring-2 ${
+                        issueValidationError && !newIssueDesc.trim()
+                          ? 'border-rose-500 focus:ring-rose-500'
+                          : 'border-rose-300 focus:ring-rose-400'
+                      }`}
+                    />
+                  </div>
+                </div>
+              ) : isMassStopIssueStatus(statusLabel) ? (
+                <p className="text-[11px] text-slate-600">
+                  Trạng thái <strong>{statusLabel}</strong> của {lineName || activeLine.name} đã có hồ sơ Issue. Đổi sang trạng thái dừng khác để tự động sinh Issue mới.
+                </p>
+              ) : (
+                <p className="text-[11px] text-slate-600">
+                  Với Line chạy <strong>Mass</strong>, mục này sẽ tự động sinh ra khi khai báo các trạng thái dừng ở mục trên (trừ <strong>Dừng hoàn thành Plan</strong>).
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/70 space-y-3">
+              <label className="flex items-center justify-between cursor-pointer">
+                <span className="font-bold text-slate-900 inline-flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-rose-600" />
+                  <span>Ghi nhận thêm Issue mới vào Bảng Theo Dõi Sự Cố</span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={addNewIssue}
+                  onChange={(e) => {
+                    setAddNewIssue(e.target.checked);
+                    setIssueValidationError('');
+                  }}
+                  className="w-4 h-4 accent-rose-600 cursor-pointer"
+                />
+              </label>
+
+              {addNewIssue && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-slate-200">
+                  <div className="sm:col-span-2">
+                    <label
+                      htmlFor="quick-report-issue-title"
+                      className="block font-semibold text-slate-700 mb-1"
+                    >
+                      Tiêu đề sự cố phát sinh <span className="text-rose-600">*</span>
+                    </label>
+                    <input
+                      id="quick-report-issue-title"
+                      type="text"
+                      value={newIssueTitle}
+                      onChange={(e) => {
+                        setNewIssueTitle(e.target.value);
+                        if (issueValidationError && e.target.value.trim() && newIssueDesc.trim()) {
+                          setIssueValidationError('');
+                        }
+                      }}
+                      placeholder={`VD: Thiếu vật tư tại ${lineName || activeLine.name}...`}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Mức độ</label>
+                    <select
+                      value={newIssueSeverity}
+                      onChange={(e) => setNewIssueSeverity(e.target.value as IssueSeverity)}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 bg-white font-semibold"
+                    >
+                      <option value="high">Khẩn cấp (High)</option>
+                      <option value="medium">Trung bình (Medium)</option>
+                      <option value="low">Thấp (Low)</option>
+                    </select>
+                  </div>
+                  <div className="sm:col-span-3">
+                    <label
+                      htmlFor="quick-report-issue-desc"
+                      className="block font-semibold text-slate-700 mb-1"
+                    >
+                      Mô tả &amp; đề xuất xử lý <span className="text-rose-600">*</span>
+                    </label>
+                    <textarea
+                      id="quick-report-issue-desc"
+                      rows={2}
+                      value={newIssueDesc}
+                      onChange={(e) => {
+                        setNewIssueDesc(e.target.value);
+                        if (issueValidationError && e.target.value.trim() && newIssueTitle.trim()) {
+                          setIssueValidationError('');
+                        }
+                      }}
+                      placeholder="Bắt buộc nhập chi tiết ảnh hưởng đến tiến độ dây chuyền..."
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 bg-white"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {issueValidationError && (
+            <div className="rounded-xl border border-rose-300 bg-rose-50 px-3.5 py-2.5 text-xs font-bold text-rose-700">
+              {issueValidationError}
+            </div>
+          )}
+
+          {vtValidationError && (
+            <div className="rounded-xl border border-rose-300 bg-rose-50 px-3.5 py-2.5 text-xs font-bold text-rose-700 flex items-center justify-between gap-2">
+              <span>{vtValidationError}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setVtPercent(100);
+                  setVtValidationError('');
+                }}
+                className="shrink-0 px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold cursor-pointer"
+              >
+                Đặt VT 100%
+              </button>
+            </div>
+          )}
 
           {/* Footer Actions */}
           <div className="pt-4 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -823,7 +1466,12 @@ export function LineQuickReportModal({
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm inline-flex items-center gap-1.5 cursor-pointer"
+                aria-disabled={!canSubmitReport}
+                className={`px-4 py-2 text-xs font-bold rounded-lg shadow-sm inline-flex items-center gap-1.5 transition ${
+                  canSubmitReport
+                    ? 'text-white bg-blue-600 hover:bg-blue-700 cursor-pointer'
+                    : 'text-slate-500 bg-slate-200 border border-slate-300 cursor-not-allowed'
+                }`}
               >
                 <Save className="w-4 h-4" />
                 <span>Lưu &amp; Cập nhật {lineName || activeLine.name}</span>

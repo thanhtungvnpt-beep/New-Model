@@ -35,12 +35,36 @@ export function formatViDateFull(iso: string): string {
   return `${d}/${m}/${y}`;
 }
 
+export function formatLineTimestamp(date = new Date()): string {
+  const time = date.toLocaleTimeString('vi-VN', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${time} · ${day}/${month}`;
+}
+
 export function isLineCompleted(line: Pick<ProductionLine, 'statusLabel' | 'vtPercent' | 'healthPercent' | 'issueCount'>): boolean {
+  if (
+    line.statusLabel === 'Dừng do Máy hỏng' ||
+    line.statusLabel === 'Dừng do Vật liệu' ||
+    line.statusLabel === 'Dừng do Lỗi thao tác' ||
+    line.statusLabel === 'Dừng Chất lượng' ||
+    line.statusLabel === 'Dừng do Sự cố điện' ||
+    line.statusLabel === 'Dừng do Thiếu người' ||
+    line.statusLabel === 'Dừng Bảo dưỡng' ||
+    line.statusLabel === 'Dừng Vệ Sinh' ||
+    line.statusLabel === 'Dừng do Lỗi khác' ||
+    line.statusLabel === 'Dừng do Hết Plan' ||
+    line.statusLabel === 'Tạm Hoãn'
+  ) {
+    return false;
+  }
   return (
-    line.statusLabel === 'Hoàn thành' ||
-    line.statusLabel === 'Đã kích hoạt' ||
-    (line.statusLabel === 'Chạy Tốt' && line.vtPercent >= 100 && line.issueCount === 0) ||
-    (line.vtPercent >= 100 && line.healthPercent >= 100 && line.issueCount === 0)
+    line.statusLabel === 'Mass Ready' ||
+    line.statusLabel === 'Dừng hoàn thành Plan' ||
+    (line.statusLabel === 'Đang sản xuất' && line.vtPercent >= 100 && line.issueCount === 0)
   );
 }
 
@@ -52,13 +76,15 @@ export const INITIAL_LINES: ProductionLine[] = [
     name: 'Line 1',
     stage: 'Line 1 - SMT Assembly',
     shortStage: 'CNC',
+    characteristic: 'mas',
     vtPercent: 100,
     healthPercent: 85,
     issueCount: 0,
-    statusLabel: 'Chạy Tốt',
+    statusLabel: 'Đang sản xuất',
     healthBadge: 'Ổn định',
     healthTone: 'emerald',
     leader: 'Lê Hoàng Đức',
+    updatedAt: `08:40 · ${formatViDateShort(TODAY_ISO)}`,
     setupTimeline: {
       currentDate: TODAY_ISO,
       targetDate: TODAY_ISO,
@@ -70,13 +96,15 @@ export const INITIAL_LINES: ProductionLine[] = [
     name: 'Line 2',
     stage: 'Line 2 - Wave Soldering',
     shortStage: 'CNC.',
+    characteristic: 'mas',
     vtPercent: 100,
     healthPercent: 70,
     issueCount: 0,
-    statusLabel: 'Chạy Tốt',
+    statusLabel: 'Đang sản xuất',
     healthBadge: 'Tối ưu',
     healthTone: 'emerald',
     leader: 'Phạm Minh Hoàng',
+    updatedAt: `08:35 · ${formatViDateShort(TODAY_ISO)}`,
     setupTimeline: {
       currentDate: TODAY_ISO,
       targetDate: TODAY_ISO,
@@ -88,13 +116,15 @@ export const INITIAL_LINES: ProductionLine[] = [
     name: 'Line 3',
     stage: 'Line 3 - Manual Assembly',
     shortStage: 'CNC',
+    characteristic: 'new',
     vtPercent: 100,
     healthPercent: 60,
     issueCount: 0,
-    statusLabel: 'Đang Setup',
+    statusLabel: 'Đang Lắp Ráp',
     healthBadge: 'Nút thắt cổ chai',
     healthTone: 'rose',
     leader: 'Nguyễn Văn Tuấn',
+    updatedAt: `08:15 · ${formatViDateShort(TODAY_ISO)}`,
     setupTimeline: {
       currentDate: TODAY_ISO,
       targetDate: addDaysToIso(TODAY_ISO, 3),
@@ -106,13 +136,15 @@ export const INITIAL_LINES: ProductionLine[] = [
     name: 'Line 4',
     stage: 'Line 4 - Function Test',
     shortStage: 'CNC',
+    characteristic: 'new',
     vtPercent: 90,
     healthPercent: 90,
     issueCount: 0,
-    statusLabel: 'Gần xong',
+    statusLabel: 'Chạy thử',
     healthBadge: 'Sắp hoàn thành',
     healthTone: 'emerald',
     leader: 'Đặng Quốc Bảo',
+    updatedAt: `08:30 · ${formatViDateShort(TODAY_ISO)}`,
     setupTimeline: {
       currentDate: TODAY_ISO,
       targetDate: addDaysToIso(TODAY_ISO, 2),
@@ -124,13 +156,15 @@ export const INITIAL_LINES: ProductionLine[] = [
     name: 'Line 5',
     stage: 'Line 5 - Final Packing',
     shortStage: 'Block',
+    characteristic: 'mas',
     vtPercent: 45,
     healthPercent: 45,
     issueCount: 3,
-    statusLabel: 'Chờ Vật Tư',
-    healthBadge: 'Cần bổ sung vật tư',
-    healthTone: 'amber',
+    statusLabel: 'Dừng do Máy hỏng',
+    healthBadge: 'Nút thắt cổ chai',
+    healthTone: 'rose',
     leader: 'Trần Thị Mai',
+    updatedAt: `08:05 · ${formatViDateShort(TODAY_ISO)}`,
     setupTimeline: {
       currentDate: TODAY_ISO,
       targetDate: addDaysToIso(TODAY_ISO, 2),
@@ -142,13 +176,15 @@ export const INITIAL_LINES: ProductionLine[] = [
     name: 'Line 6',
     stage: 'Line 6 - Sub-assembly',
     shortStage: 'Block',
-    vtPercent: 80,
-    healthPercent: 80,
+    characteristic: 'mas',
+    vtPercent: 100,
+    healthPercent: 90,
     issueCount: 1,
-    statusLabel: 'Chạy Tốt',
+    statusLabel: 'Đang sản xuất',
     healthBadge: 'Ổn định',
     healthTone: 'emerald',
     leader: 'Trần Quốc Thắng',
+    updatedAt: `08:20 · ${formatViDateShort(TODAY_ISO)}`,
     setupTimeline: {
       currentDate: TODAY_ISO,
       targetDate: addDaysToIso(TODAY_ISO, 4),
@@ -160,13 +196,15 @@ export const INITIAL_LINES: ProductionLine[] = [
     name: 'Line 7',
     stage: 'Line 7 - AOI Inspection',
     shortStage: 'Block',
-    vtPercent: 95,
-    healthPercent: 95,
+    characteristic: 'mas',
+    vtPercent: 100,
+    healthPercent: 100,
     issueCount: 0,
-    statusLabel: 'Gần xong',
-    healthBadge: 'Gần hoàn thành',
+    statusLabel: 'Dừng hoàn thành Plan',
+    healthBadge: 'Ổn định',
     healthTone: 'emerald',
     leader: 'Vũ Đình Toàn',
+    updatedAt: `08:10 · ${formatViDateShort(TODAY_ISO)}`,
     setupTimeline: {
       currentDate: TODAY_ISO,
       targetDate: addDaysToIso(TODAY_ISO, 1),
@@ -178,13 +216,15 @@ export const INITIAL_LINES: ProductionLine[] = [
     name: 'Line 8',
     stage: 'Line 8 - ICT Testing',
     shortStage: 'Burn-in',
+    characteristic: 'new',
     vtPercent: 55,
     healthPercent: 55,
     issueCount: 2,
-    statusLabel: 'Đang test',
+    statusLabel: 'Test Lại',
     healthBadge: 'Chờ kiểm tra',
     healthTone: 'amber',
     leader: 'Lê Văn Thành',
+    updatedAt: `08:10 · ${formatViDateShort(TODAY_ISO)}`,
     setupTimeline: {
       currentDate: TODAY_ISO,
       targetDate: addDaysToIso(TODAY_ISO, 3),
@@ -196,13 +236,15 @@ export const INITIAL_LINES: ProductionLine[] = [
     name: 'Line 9',
     stage: 'Line 9 - Conformal Coating',
     shortStage: 'Block',
-    vtPercent: 75,
-    healthPercent: 75,
+    characteristic: 'mas',
+    vtPercent: 100,
+    healthPercent: 90,
     issueCount: 1,
-    statusLabel: 'Chạy Tốt',
+    statusLabel: 'Đang sản xuất',
     healthBadge: 'Ổn định',
     healthTone: 'emerald',
     leader: 'Nguyễn Văn Tuấn',
+    updatedAt: `08:25 · ${formatViDateShort(TODAY_ISO)}`,
     setupTimeline: {
       currentDate: TODAY_ISO,
       targetDate: addDaysToIso(TODAY_ISO, 5),
@@ -214,13 +256,15 @@ export const INITIAL_LINES: ProductionLine[] = [
     name: 'Line 10',
     stage: 'Line 10 - Quality Audit',
     shortStage: 'Block',
+    characteristic: 'mas',
     vtPercent: 40,
     healthPercent: 40,
     issueCount: 2,
-    statusLabel: 'Chờ xuất',
+    statusLabel: 'Dừng do Vật liệu',
     healthBadge: 'Cần bổ sung vật tư',
     healthTone: 'amber',
     leader: 'Lê Hoàng Đức',
+    updatedAt: `08:05 · ${formatViDateShort(TODAY_ISO)}`,
     setupTimeline: {
       currentDate: TODAY_ISO,
       targetDate: addDaysToIso(TODAY_ISO, 2),
@@ -562,6 +606,96 @@ export const INITIAL_ISSUES: IssueItem[] = [
     statusText: 'Đã thay mới',
     progress: 100,
     notes: 'Đã nạp cuộn giấy lau mới và bơm cồn IPA rửa stencil, máy hoạt động bình thường.',
+  },
+  {
+    id: 'ISS-013',
+    line: 'Line 6',
+    itemCode: 'A6 - ABC6',
+    title: 'Thiếu 2 bộ gá giữ cụm cơ khí Sub-assembly ở trạm số 2',
+    description: 'Bộ gá dự phòng đang chờ thay đệm cao su chống trầy vỏ nhôm.',
+    severity: 'medium',
+    assignee: 'Trần Quốc Thắng',
+    assigneeRole: 'Kỹ sư Line 6',
+    duration: '40m',
+    sinceTime: 'Từ 08:20',
+    statusText: 'Đang thay đệm gá',
+    progress: 70,
+    notes: 'Tổ JIG đang dán lại đệm silicone và kiểm tra độ đồng tâm trước khi lắp vào chuyền.',
+  },
+  {
+    id: 'ISS-014',
+    line: 'Line 8',
+    itemCode: 'A8 - ABC8',
+    title: 'Chân kim test bed ICT bị oxy hóa gây tiếp xúc chập chờn',
+    description: 'Khi chạy test model mới trên Line 8, kênh đo nguồn phụ báo lỗi tiếp xúc tại chân pogo pin #14.',
+    severity: 'high',
+    assignee: 'Lê Văn Thành',
+    assigneeRole: 'Kỹ sư Test Line 8',
+    duration: '1h 20m',
+    sinceTime: 'Từ 07:40',
+    statusText: 'Thay pogo pin',
+    progress: 55,
+    notes: 'Đang thay 4 chân kim pogo mới và chạy lại test kiểm chứng trên 10 bo mạch mẫu.',
+  },
+  {
+    id: 'ISS-015',
+    line: 'Line 8',
+    itemCode: 'A8 - ABC8',
+    title: 'Chưa đồng bộ profile nhiệt lò Burn-in cho model thử nghiệm mới',
+    description: 'Cần điều chỉnh đường cong gia nhiệt 65°C trong 30 phút theo thông số R&D mới ban hành.',
+    severity: 'medium',
+    assignee: 'Lê Văn Thành',
+    assigneeRole: 'Kỹ sư Test Line 8',
+    duration: '50m',
+    sinceTime: 'Từ 08:10',
+    statusText: 'Cập nhật profile',
+    progress: 65,
+    notes: 'Đã nạp profile mới vào bộ điều khiển nhiệt, đang theo dõi ổn định buồng test.',
+  },
+  {
+    id: 'ISS-016',
+    line: 'Line 9',
+    itemCode: 'A9 - ABC9',
+    title: 'Áp suất vòi phun keo phủ bảo vệ (Conformal Coating) giảm nhẹ',
+    description: 'Lọc khí đầu vào có cặn ẩm làm độ dày lớp keo mỏng hơn tiêu chuẩn 5 micron.',
+    severity: 'low',
+    assignee: 'Nguyễn Văn Tuấn',
+    assigneeRole: 'Kỹ sư Line 9',
+    duration: '35m',
+    sinceTime: 'Từ 08:25',
+    statusText: 'Đang xả lọc khí',
+    progress: 80,
+    notes: 'Đã vệ sinh lọc tách nước và căn chỉnh lại áp suất phun về mức 2.4 bar.',
+  },
+  {
+    id: 'ISS-017',
+    line: 'Line 10',
+    itemCode: 'A10 - ABC10',
+    title: 'Thiếu tem kiểm định chất lượng đầu ra lô hàng chờ xuất',
+    description: 'Cần bổ sung 200 tem QC Pass từ kho vật tư để hoàn tất niêm phong pallet.',
+    severity: 'medium',
+    assignee: 'Lê Hoàng Đức',
+    assigneeRole: 'Trưởng ban QA/QC',
+    duration: '1h 10m',
+    sinceTime: 'Từ 07:50',
+    statusText: 'Chờ cấp tem QC',
+    progress: 45,
+    notes: 'Kho đã xuất cuộn tem mới, đang chuyển xuống trạm Quality Audit.',
+  },
+  {
+    id: 'ISS-018',
+    line: 'Line 10',
+    itemCode: 'A11 - ABC11',
+    title: 'Cân điện tử kiểm tra trọng lượng thùng thành phẩm lệch sai số',
+    description: 'Sai số +15g so với quả cân chuẩn 5kg, tạm dừng xác nhận xuất lô A11.',
+    severity: 'high',
+    assignee: 'Lê Hoàng Đức',
+    assigneeRole: 'Trưởng ban QA/QC',
+    duration: '55m',
+    sinceTime: 'Từ 08:05',
+    statusText: 'Đang hiệu chuẩn cân',
+    progress: 50,
+    notes: 'Đội bảo trì thiết bị đo đang hiệu chuẩn lại loadcell bằng quả cân chuẩn F1.',
   },
 ];
 

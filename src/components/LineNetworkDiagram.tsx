@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, ClipboardEdit, Lock, LockOpen, PlusCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ClipboardEdit, Clock, Lock, LockOpen, PlusCircle } from 'lucide-react';
 import {
   addDaysToIso,
   diffDaysIso,
@@ -13,6 +13,7 @@ interface LineNetworkDiagramProps {
   selectedLineFilter: string;
   isAdminMode: boolean;
   onQuickReportLine: (lineId: string) => void;
+  onInspectLineIssues: (target: string) => void;
   onAdminEditLine: () => void;
   onClearLineFilter: () => void;
   onOpenAddLine: () => void;
@@ -23,6 +24,7 @@ export function LineNetworkDiagram({
   selectedLineFilter,
   isAdminMode,
   onQuickReportLine,
+  onInspectLineIssues,
   onAdminEditLine,
   onClearLineFilter,
   onOpenAddLine,
@@ -36,6 +38,24 @@ export function LineNetworkDiagram({
   const remainingRows = lines.slice(5);
 
   const getLineTheme = (line: ProductionLine) => {
+    if (
+      line.statusLabel === 'Dừng do Máy hỏng' ||
+      line.statusLabel === 'Dừng do Lỗi thao tác' ||
+      line.statusLabel === 'Dừng Chất lượng' ||
+      line.statusLabel === 'Dừng do Sự cố điện' ||
+      line.statusLabel === 'Tạm Hoãn' ||
+      line.healthTone === 'rose'
+    ) {
+      return {
+        cardFrame:
+          'border-rose-500 bg-white shadow-[0_0_15px_rgba(244,63,94,0.35)] hover:shadow-[0_0_22px_rgba(244,63,94,0.55)] hover:border-rose-600',
+        circleBg: 'from-rose-500 to-red-600 shadow-[0_0_12px_rgba(244,63,94,0.4)]',
+        subtitleText: 'text-rose-100',
+        statusColor: 'text-rose-700',
+        dotColor: 'bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.8)]',
+      };
+    }
+
     if (isLineCompleted(line)) {
       return {
         cardFrame:
@@ -47,23 +67,18 @@ export function LineNetworkDiagram({
       };
     }
 
-    if (line.healthTone === 'rose') {
-      return {
-        cardFrame:
-          'border-rose-500 bg-white shadow-[0_0_15px_rgba(244,63,94,0.35)] hover:shadow-[0_0_22px_rgba(244,63,94,0.55)] hover:border-rose-600',
-        circleBg: 'from-rose-500 to-red-600 shadow-[0_0_12px_rgba(244,63,94,0.4)]',
-        subtitleText: 'text-rose-100',
-        statusColor: 'text-rose-700',
-        dotColor: 'bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.8)]',
-      };
-    }
-
     if (
       line.healthTone === 'amber' ||
+      line.statusLabel === 'Dừng do Vật liệu' ||
+      line.statusLabel === 'Dừng do Thiếu người' ||
+      line.statusLabel === 'Dừng Bảo dưỡng' ||
+      line.statusLabel === 'Dừng Vệ Sinh' ||
+      line.statusLabel === 'Dừng do Lỗi khác' ||
+      line.statusLabel === 'Dừng do Hết Plan' ||
       line.statusLabel === 'Chờ Vật Tư' ||
-      line.statusLabel === 'Đang Setup' ||
-      line.statusLabel === 'Đang test' ||
-      line.statusLabel === 'Chờ xuất'
+      line.statusLabel === 'Đang Lắp Ráp' ||
+      line.statusLabel === 'Đang cài đặt' ||
+      line.statusLabel === 'Test Lại'
     ) {
       return {
         cardFrame:
@@ -75,7 +90,7 @@ export function LineNetworkDiagram({
       };
     }
 
-    if (line.statusLabel === 'Gần xong') {
+    if (line.statusLabel === 'Chạy thử') {
       return {
         cardFrame:
           'border-cyan-400 bg-white shadow-[0_0_15px_rgba(6,182,212,0.32)] hover:shadow-[0_0_22px_rgba(6,182,212,0.52)] hover:border-cyan-500',
@@ -150,19 +165,47 @@ export function LineNetworkDiagram({
     const issueTheme = getIssueBadgeTheme(line.issueCount);
 
     return (
-      <button
+      <div
         key={line.id}
-        type="button"
+        role="button"
+        tabIndex={0}
         onClick={() => onQuickReportLine(line.id)}
-        className={`group relative z-10 flex flex-col items-center px-2.5 py-3 rounded-2xl border-2 transition-all duration-200 cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600 ${
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onQuickReportLine(line.id);
+          }
+        }}
+        className={`group relative z-10 flex flex-col items-center px-2.5 pt-7 pb-3 rounded-2xl border-2 transition-all duration-200 cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600 ${
           theme.cardFrame
         } ${
           isSelected
             ? 'ring-2 ring-blue-600 ring-offset-2 ring-offset-white scale-[1.03]'
             : 'hover:-translate-y-0.5'
         }`}
-        title={`${line.stage} (${line.healthBadge}) — Nhấp để báo cáo nhanh hoặc sửa thông tin Line`}
+        title={`${line.stage} (${line.healthBadge}) — Nhấp thẻ để báo cáo nhanh, hoặc nhấp vào ô Issue để xem chi tiết vấn đề`}
       >
+        <span
+          title={
+            line.characteristic === 'new'
+              ? 'Đặc tính Line: New — Line đang test thử model mới'
+              : 'Đặc tính Line: Mass — Đã đi vào sản xuất hàng loạt'
+          }
+          className={`absolute top-1.5 left-1.5 z-30 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[9px] font-extrabold leading-none whitespace-nowrap shadow-xs ${
+            line.characteristic === 'new'
+              ? 'bg-violet-100 border-violet-300 text-violet-800'
+              : 'bg-sky-100 border-sky-300 text-sky-800'
+          }`}
+        >
+          <span
+            className={`w-1.5 h-1.5 rounded-full ${
+              line.characteristic === 'new' ? 'bg-violet-600' : 'bg-sky-600'
+            }`}
+          />
+          <span className="uppercase tracking-wide">
+            {line.characteristic === 'new' ? 'New · Test' : 'Mass'}
+          </span>
+        </span>
         <div className="flex items-center justify-center gap-1.5 h-9 -mb-1.5 z-20">
           <div
             className={`min-w-[48px] px-1.5 h-8 rounded-lg border-[1.5px] flex flex-col items-center justify-center gap-0.5 transition-colors ${vtTheme.box}`}
@@ -174,8 +217,14 @@ export function LineNetworkDiagram({
               {line.vtPercent}%
             </span>
           </div>
-          <div
-            className={`min-w-[44px] px-1.5 h-8 rounded-lg border-[1.5px] flex flex-col items-center justify-center gap-0.5 transition-colors ${issueTheme.box}`}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onInspectLineIssues(line.id);
+            }}
+            title={`Nhấp để xem chi tiết vấn đề của ${line.name} (${line.issueCount} Issue)`}
+            className={`min-w-[44px] px-1.5 h-8 rounded-lg border-[1.5px] flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer hover:scale-105 hover:ring-2 hover:ring-rose-400/70 focus-visible:outline-2 focus-visible:outline-rose-600 ${issueTheme.box}`}
           >
             <span className={`text-[8px] font-bold leading-none whitespace-nowrap ${issueTheme.label}`}>
               Issue
@@ -185,7 +234,7 @@ export function LineNetworkDiagram({
             >
               {line.issueCount}
             </span>
-          </div>
+          </button>
         </div>
         <div
           className={`w-16 h-16 rounded-full bg-gradient-to-br text-white flex flex-col items-center justify-center border-2 border-white shrink-0 group-hover:scale-105 transition-all ${theme.circleBg}`}
@@ -205,16 +254,26 @@ export function LineNetworkDiagram({
             <span>{line.statusLabel}</span>
           </span>
           {(() => {
-            const completed = isLineCompleted(line);
+            const isMassLine = line.characteristic === 'mas';
+            const isSetupDone = isMassLine || line.statusLabel === 'Mass Ready';
+            const completed = isSetupDone || isLineCompleted(line);
             if (completed) {
               return (
                 <div
                   className="mt-1.5 w-full rounded-lg bg-emerald-50 border border-emerald-300 px-2 py-1.5 text-[9.5px] leading-tight"
-                  title="Line đã hoàn thành"
+                  title={
+                    isMassLine
+                      ? 'Line đã chuyển sang Mass — Setup hoàn thành'
+                      : isSetupDone
+                      ? 'New model — Mass Ready (Setup hoàn thành)'
+                      : 'Line đã hoàn thành'
+                  }
                 >
                   <div className="flex items-center justify-center gap-1 text-emerald-700 font-bold">
                     <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
-                    <span>Hoàn thành</span>
+                    <span className="whitespace-nowrap">
+                      {isSetupDone ? 'Setup hoàn thành' : 'Hoàn thành'}
+                    </span>
                   </div>
                   <div className="mt-1 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.45)]" />
                 </div>
@@ -343,11 +402,18 @@ export function LineNetworkDiagram({
               </div>
             );
           })()}
-          <span className="text-[10px] text-slate-500 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <span
+            className="mt-1.5 inline-flex items-center justify-center gap-1 text-[9.5px] font-medium text-slate-500 tabular-nums whitespace-nowrap"
+            title={`Cập nhật gần nhất: ${line.updatedAt || 'Chưa có'}`}
+          >
+            <Clock className="w-2.5 h-2.5 shrink-0 text-slate-400" />
+            <span>Cập nhật: {line.updatedAt || '--:--'}</span>
+          </span>
+          <span className="text-[9.5px] text-slate-500 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity leading-none">
             {isAdminMode ? 'Sửa & Báo cáo' : 'Báo cáo nhanh'}
           </span>
         </div>
-      </button>
+      </div>
     );
   };
 
@@ -408,7 +474,7 @@ export function LineNetworkDiagram({
             </div>
             <div className="flex items-center gap-1.5 whitespace-nowrap">
               <span className="w-3 h-3 rounded-full bg-cyan-500 inline-block shadow-[0_0_6px_rgba(6,182,212,0.75)]" />
-              <span className="text-slate-600 font-medium">Gần xong</span>
+              <span className="text-slate-600 font-medium">Chạy thử</span>
             </div>
             <div className="flex items-center gap-1.5 whitespace-nowrap">
               <span className="w-3 h-3 rounded-full bg-amber-500 inline-block shadow-[0_0_6px_rgba(245,158,11,0.75)]" />
@@ -417,6 +483,15 @@ export function LineNetworkDiagram({
             <div className="flex items-center gap-1.5 whitespace-nowrap">
               <span className="w-3 h-3 rounded-full bg-rose-500 inline-block shadow-[0_0_6px_rgba(244,63,94,0.75)]" />
               <span className="text-slate-600 font-medium">Cảnh báo / Nhiều Issue</span>
+            </div>
+            <span className="text-slate-300 hidden sm:inline">|</span>
+            <div className="flex items-center gap-1.5 whitespace-nowrap">
+              <span className="px-1.5 py-0.5 rounded bg-violet-100 border border-violet-300 text-violet-800 text-[10px] font-bold">
+                New · Test: Test model mới
+              </span>
+              <span className="px-1.5 py-0.5 rounded bg-sky-100 border border-sky-300 text-sky-800 text-[10px] font-bold">
+                Mass: SX hàng loạt
+              </span>
             </div>
           </div>
         </div>
@@ -443,8 +518,11 @@ export function LineNetworkDiagram({
                     {avgVt}%
                   </span>
                 </div>
-                <div
-                  className={`min-w-[48px] px-2 h-8 rounded-lg border-[1.5px] flex flex-col items-center justify-center gap-0.5 transition-colors ${hubIssueTheme.box}`}
+                <button
+                  type="button"
+                  onClick={() => onInspectLineIssues('HUB')}
+                  title={`Nhấp để xem toàn bộ ${totalLineIssues} Issue trên hệ thống`}
+                  className={`min-w-[48px] px-2 h-8 rounded-lg border-[1.5px] flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer hover:scale-105 hover:ring-2 hover:ring-rose-400/70 focus-visible:outline-2 focus-visible:outline-rose-600 ${hubIssueTheme.box}`}
                 >
                   <span
                     className={`text-[8.5px] font-bold leading-none whitespace-nowrap ${hubIssueTheme.label}`}
@@ -456,7 +534,7 @@ export function LineNetworkDiagram({
                   >
                     {totalLineIssues}
                   </span>
-                </div>
+                </button>
               </div>
               <button
                 type="button"
