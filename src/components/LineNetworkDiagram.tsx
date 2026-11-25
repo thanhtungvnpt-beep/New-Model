@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, ClipboardEdit, Clock, Lock, LockOpen, PlusCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ClipboardEdit, Clock, Lock, LockOpen, PlusCircle, UserCheck } from 'lucide-react';
 import {
   addDaysToIso,
   diffDaysIso,
@@ -252,6 +252,13 @@ export function LineNetworkDiagram({
           >
             <span className={`w-1.5 h-1.5 rounded-full ${theme.dotColor}`} />
             <span>{line.statusLabel}</span>
+          </span>
+          <span
+            className="mt-0.5 inline-flex items-center justify-center gap-1 text-[9.5px] font-medium text-slate-600 max-w-full"
+            title={`Line Leader phụ trách: ${line.leader}`}
+          >
+            <UserCheck className="w-2.5 h-2.5 shrink-0 text-blue-600" />
+            <span className="truncate">{line.leader}</span>
           </span>
           {(() => {
             const isMassLine = line.characteristic === 'mas';

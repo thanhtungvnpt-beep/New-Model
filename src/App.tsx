@@ -58,6 +58,7 @@ export default function App() {
   const [selectedLineFilter, setSelectedLineFilter] = useState('all');
 
   const [isAdminMode, setIsAdminMode] = useState(false);
+  const [adminAuthIntent, setAdminAuthIntent] = useState<'demand' | 'line'>('demand');
   const [lastAdminReason, setLastAdminReason] = useState('');
 
   // Modals state
@@ -367,16 +368,38 @@ export default function App() {
       severity: 'high' | 'medium' | 'low';
       description: string;
     },
-    adminEdited?: boolean
+    adminEdited?: boolean,
+    syncLeaderToIssues?: boolean
   ) => {
     const prevLine = lines.find((l) => l.id === updatedLine.id);
     setLines((prev) => prev.map((l) => (l.id === updatedLine.id ? updatedLine : l)));
 
-    if (prevLine && prevLine.name !== updatedLine.name) {
+    const nameChanged = Boolean(prevLine && prevLine.name !== updatedLine.name);
+    const leaderSyncNeeded = Boolean(
+      syncLeaderToIssues && prevLine && prevLine.leader !== updatedLine.leader
+    );
+
+    if (nameChanged || leaderSyncNeeded) {
+      const matchLineName = prevLine?.name || updatedLine.name;
       setIssues((prev) =>
-        prev.map((iss) => (iss.line === prevLine.name ? { ...iss, line: updatedLine.name } : iss))
+        prev.map((iss) => {
+          if (iss.line !== matchLineName) return iss;
+          const nextLineName = nameChanged ? updatedLine.name : iss.line;
+          const nextAssignee =
+            leaderSyncNeeded && iss.progress < 100 ? updatedLine.leader : iss.assignee;
+          const nextRole =
+            leaderSyncNeeded && iss.progress < 100
+              ? `Line Leader ${updatedLine.name}`
+              : iss.assigneeRole;
+          return {
+            ...iss,
+            line: nextLineName,
+            assignee: nextAssignee,
+            assigneeRole: nextRole,
+          };
+        })
       );
-      if (selectedLineFilter === prevLine.name) {
+      if (nameChanged && prevLine && selectedLineFilter === prevLine.name) {
         setSelectedLineFilter(updatedLine.name);
       }
     }
@@ -590,6 +613,7 @@ export default function App() {
             if (isAdminMode) {
               setQuickReportLineId(lines[0]?.id || 'line-1');
             } else {
+              setAdminAuthIntent('line');
               setAdminAuthOpen(true);
             }
           }}
@@ -611,7 +635,10 @@ export default function App() {
         <TargetDemandSpecs
           items={pipelineItems}
           isAdminMode={isAdminMode}
-          onRequestAdminAuth={() => setAdminAuthOpen(true)}
+          onRequestAdminAuth={() => {
+            setAdminAuthIntent('demand');
+            setAdminAuthOpen(true);
+          }}
           onExitAdminMode={() => setIsAdminMode(false)}
           onSaveDemands={handleSaveTargetDemands}
           onOpenAuditHistory={() => setAuditHistoryOpen(true)}
@@ -684,7 +711,10 @@ export default function App() {
         lines={lines}
         initialLineId={quickReportLineId}
         isAdminMode={isAdminMode}
-        onRequestAdminAuth={() => setAdminAuthOpen(true)}
+        onRequestAdminAuth={() => {
+          setAdminAuthIntent('line');
+          setAdminAuthOpen(true);
+        }}
         onExitAdminMode={() => setIsAdminMode(false)}
         onClose={() => setQuickReportLineId(null)}
         onSaveLineReport={handleSaveLineQuickReport}
@@ -709,13 +739,6 @@ export default function App() {
         issues={issues}
         onClose={() => setInspectIssuesTarget(null)}
         onSelectIssueDetail={(issueId) => setEditingIssueId(issueId)}
-        onQuickResolveIssue={(issueId, currentNotes) =>
-          handleSaveIssueProgress(
-            issueId,
-            100,
-            currentNotes || 'Đã khắc phục hoàn toàn 100%.'
-          )
-        }
         onOpenQuickReport={(lineId) => setQuickReportLineId(lineId)}
         onFilterInTable={(lineName) => {
           setSelectedLineFilter(lineName);
@@ -779,7 +802,18 @@ export default function App() {
         onAuthenticate={(reason) => {
           setLastAdminReason(reason);
           setIsAdminMode(true);
-          pushToast('Xác thực Admin thành công', 'Đã mở khóa chỉnh sửa Target Demand.', 'blue');
+          if (adminAuthIntent === 'line') {
+            if (!quickReportLineId) {
+              setQuickReportLineId(lines[0]?.id || 'line-1');
+            }
+            pushToast(
+              'Xác thực Admin thành công',
+              'Đã mở khóa sửa thông tin Line, Line Leader phụ trách & định mức.',
+              'blue'
+            );
+          } else {
+            pushToast('Xác thực Admin thành công', 'Đã mở khóa chỉnh sửa Target Demand.', 'blue');
+          }
         }}
       />
 

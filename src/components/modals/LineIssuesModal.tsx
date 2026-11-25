@@ -20,7 +20,6 @@ interface LineIssuesModalProps {
   issues: IssueItem[];
   onClose: () => void;
   onSelectIssueDetail: (issueId: string) => void;
-  onQuickResolveIssue: (issueId: string, notes: string) => void;
   onOpenQuickReport: (lineId: string) => void;
   onFilterInTable: (lineName: string) => void;
 }
@@ -34,7 +33,6 @@ export function LineIssuesModal({
   issues,
   onClose,
   onSelectIssueDetail,
-  onQuickResolveIssue,
   onOpenQuickReport,
   onFilterInTable,
 }: LineIssuesModalProps) {
@@ -309,17 +307,6 @@ export function LineIssuesModal({
                     </div>
 
                     <div className="flex flex-row sm:flex-col items-stretch sm:items-end gap-1.5 shrink-0">
-                      {!isResolved && (
-                        <button
-                          type="button"
-                          onClick={() => onQuickResolveIssue(issue.id, issue.notes)}
-                          title="Đánh dấu đã khắc phục 100% và tự động trừ 1 Issue trên Line"
-                          className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-xs transition cursor-pointer whitespace-nowrap"
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Khắc phục 100%</span>
-                        </button>
-                      )}
                       <button
                         type="button"
                         onClick={() => onSelectIssueDetail(issue.id)}

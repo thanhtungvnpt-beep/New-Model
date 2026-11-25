@@ -43,7 +43,8 @@ interface LineQuickReportModalProps {
       severity: IssueSeverity;
       description: string;
     },
-    adminEdited?: boolean
+    adminEdited?: boolean,
+    syncLeaderToIssues?: boolean
   ) => void;
   onDeleteLine: (lineId: string) => void;
   onFilterLineIssues: (lineName: string) => void;
@@ -103,6 +104,7 @@ export function LineQuickReportModal({
   const [autoStopIssueApplied, setAutoStopIssueApplied] = useState(false);
   const [vtValidationError, setVtValidationError] = useState('');
   const [issueValidationError, setIssueValidationError] = useState('');
+  const [syncLeaderToIssues, setSyncLeaderToIssues] = useState(true);
 
   const loadLineIntoState = (target: ProductionLine) => {
     const today = getTodayIsoDate();
@@ -147,6 +149,7 @@ export function LineQuickReportModal({
     setAutoStopIssueApplied(false);
     setVtValidationError('');
     setIssueValidationError('');
+    setSyncLeaderToIssues(true);
   };
 
   const getMassStopSeverity = (status: LineHealthStatus): IssueSeverity =>
@@ -410,7 +413,8 @@ export function LineQuickReportModal({
     onSaveLineReport(
       updatedLine,
       issuePayload,
-      isAdminMode && hasStructuralChanges
+      isAdminMode && hasStructuralChanges,
+      isAdminMode && syncLeaderToIssues
     );
     onClose();
   };
@@ -901,23 +905,98 @@ export function LineQuickReportModal({
                 />
               </div>
 
-              <div className="sm:col-span-2 lg:col-span-3">
-                <label className="block font-semibold text-slate-700 mb-1 inline-flex items-center gap-1">
-                  <UserCheck className="w-3.5 h-3.5 text-blue-600" />
-                  <span>Kỹ sư / Line Leader phụ trách *</span>
-                </label>
-                <input
-                  required
-                  type="text"
-                  disabled={!isAdminMode}
-                  value={leader}
-                  onChange={(e) => setLeader(e.target.value)}
-                  className={`w-full rounded-lg border px-3 py-1.5 font-medium ${
-                    isAdminMode
-                      ? 'border-blue-300 bg-white text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none'
-                      : 'border-slate-200 bg-slate-100 text-slate-500 cursor-not-allowed'
-                  }`}
-                />
+              <div className="sm:col-span-2 lg:col-span-3 space-y-1.5">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <label
+                    htmlFor="quick-report-line-leader"
+                    className="font-semibold text-slate-700 inline-flex items-center gap-1"
+                  >
+                    <UserCheck className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Kỹ sư / Line Leader phụ trách *</span>
+                  </label>
+                  <span
+                    className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                      isAdminMode
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'bg-slate-200 text-slate-600'
+                    }`}
+                  >
+                    {isAdminMode ? 'Admin đang mở chỉnh' : 'Chỉ Admin chỉnh'}
+                  </span>
+                </div>
+                {(() => {
+                  const leaderOptions = Array.from(
+                    new Set(
+                      [
+                        'Lê Hoàng Đức',
+                        'Phạm Minh Hoàng',
+                        'Nguyễn Văn Tuấn',
+                        'Đặng Quốc Bảo',
+                        'Trần Thị Mai',
+                        'Trần Quốc Thắng',
+                        'Vũ Đình Toàn',
+                        'Lê Văn Thành',
+                        ...lines.map((l) => l.leader),
+                      ].filter(Boolean)
+                    )
+                  );
+                  return (
+                    <>
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <input
+                          id="quick-report-line-leader"
+                          required
+                          type="text"
+                          list="line-leader-suggestions"
+                          disabled={!isAdminMode}
+                          value={leader}
+                          onChange={(e) => setLeader(e.target.value)}
+                          placeholder="Nhập tên Line Leader phụ trách..."
+                          className={`flex-1 rounded-lg border px-3 py-1.5 font-medium ${
+                            isAdminMode
+                              ? 'border-blue-300 bg-white text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none'
+                              : 'border-slate-200 bg-slate-100 text-slate-500 cursor-not-allowed'
+                          }`}
+                        />
+                        {isAdminMode && (
+                          <select
+                            aria-label="Chọn nhanh Line Leader có sẵn"
+                            value={leaderOptions.includes(leader) ? leader : ''}
+                            onChange={(e) => {
+                              if (e.target.value) setLeader(e.target.value);
+                            }}
+                            className="sm:w-48 rounded-lg border border-blue-300 bg-white px-2.5 py-1.5 font-medium text-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none cursor-pointer"
+                          >
+                            <option value="">-- Chọn nhanh Leader --</option>
+                            {leaderOptions.map((name) => (
+                              <option key={name} value={name}>
+                                {name}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+                      <datalist id="line-leader-suggestions">
+                        {leaderOptions.map((name) => (
+                          <option key={name} value={name} />
+                        ))}
+                      </datalist>
+                    </>
+                  );
+                })()}
+                {isAdminMode && leader.trim() && leader.trim() !== activeLine.leader && (
+                  <label className="inline-flex items-center gap-1.5 text-[11px] font-medium text-blue-800 cursor-pointer pt-0.5">
+                    <input
+                      type="checkbox"
+                      checked={syncLeaderToIssues}
+                      onChange={(e) => setSyncLeaderToIssues(e.target.checked)}
+                      className="w-3.5 h-3.5 accent-blue-600 cursor-pointer"
+                    />
+                    <span>
+                      Cập nhật luôn người phụ trách mới ({leader.trim()}) cho các Issue đang mở của {activeLine.name}
+                    </span>
+                  </label>
+                )}
               </div>
 
               {isAdminMode && lines.length > 1 && (
