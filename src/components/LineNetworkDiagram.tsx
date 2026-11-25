@@ -1,14 +1,33 @@
-import { AlertTriangle, CheckCircle2, ClipboardEdit, Clock, Lock, LockOpen, PlusCircle, UserCheck } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowRightLeft,
+  Building2,
+  CheckCircle2,
+  ClipboardEdit,
+  Clock,
+  Cpu,
+  Lock,
+  LockOpen,
+  PlusCircle,
+  Truck,
+  UserCheck,
+} from 'lucide-react';
+import { useEffect, useState } from 'react';
 import {
   addDaysToIso,
+  DEFAULT_FACTORIES,
   diffDaysIso,
   formatViDateShort,
+  getDefaultLineCode,
+  getLineFactory,
+  getShortFactoryLabel,
   getTodayIsoDate,
   isLineCompleted,
 } from '../data/initialData';
-import { ProductionLine } from '../types/production';
+import { ProductionCenter, ProductionLine } from '../types/production';
 
 interface LineNetworkDiagramProps {
+  activeCenter: Pick<ProductionCenter, 'code' | 'name' | 'subtitle' | 'accentColor'>;
   lines: ProductionLine[];
   selectedLineFilter: string;
   isAdminMode: boolean;
@@ -19,7 +38,22 @@ interface LineNetworkDiagramProps {
   onOpenAddLine: () => void;
 }
 
+const HUB_CIRCLE_GRADIENT = {
+  blue: 'from-cyan-500 via-blue-600 to-indigo-700 shadow-[0_0_16px_rgba(37,99,235,0.4)]',
+  indigo: 'from-indigo-500 via-violet-600 to-purple-700 shadow-[0_0_16px_rgba(99,102,241,0.4)]',
+  emerald: 'from-emerald-500 via-teal-600 to-cyan-700 shadow-[0_0_16px_rgba(16,185,129,0.4)]',
+  amber: 'from-amber-500 via-orange-600 to-rose-600 shadow-[0_0_16px_rgba(245,158,11,0.4)]',
+} as const;
+
+const HUB_FRAME_BORDER = {
+  blue: 'border-cyan-400 shadow-[0_0_18px_rgba(6,182,212,0.28)]',
+  indigo: 'border-indigo-400 shadow-[0_0_18px_rgba(99,102,241,0.28)]',
+  emerald: 'border-emerald-400 shadow-[0_0_18px_rgba(16,185,129,0.28)]',
+  amber: 'border-amber-400 shadow-[0_0_18px_rgba(245,158,11,0.28)]',
+} as const;
+
 export function LineNetworkDiagram({
+  activeCenter,
   lines,
   selectedLineFilter,
   isAdminMode,
@@ -29,15 +63,53 @@ export function LineNetworkDiagram({
   onClearLineFilter,
   onOpenAddLine,
 }: LineNetworkDiagramProps) {
-  const avgVtNum =
-    lines.length > 0 ? lines.reduce((acc, l) => acc + l.vtPercent, 0) / lines.length : 76.4;
-  const avgVt = avgVtNum.toFixed(1);
-  const totalLineIssues = lines.reduce((acc, l) => acc + l.issueCount, 0);
+  const [selectedFactory, setSelectedFactory] = useState<string>('all');
 
-  const firstRow = lines.slice(0, 5);
-  const remainingRows = lines.slice(5);
+  useEffect(() => {
+    setSelectedFactory('all');
+  }, [activeCenter.code]);
+
+  const factoryOptions = Array.from(
+    new Set([...DEFAULT_FACTORIES, ...lines.map((l) => getLineFactory(l))])
+  );
+  const visibleLines =
+    selectedFactory === 'all'
+      ? lines
+      : lines.filter((l) => getLineFactory(l) === selectedFactory);
+
+  const avgVtNum =
+    visibleLines.length > 0
+      ? visibleLines.reduce((acc, l) => acc + l.vtPercent, 0) / visibleLines.length
+      : 0;
+  const avgVt = avgVtNum.toFixed(1);
+  const totalLineIssues = visibleLines.reduce((acc, l) => acc + l.issueCount, 0);
+
+  const firstRow = visibleLines.slice(0, 5);
+  const remainingRows = visibleLines.slice(5);
 
   const getLineTheme = (line: ProductionLine) => {
+    if (line.statusLabel === 'Đang tháo chuyển') {
+      return {
+        cardFrame:
+          'border-dashed border-sky-500 bg-sky-50/40 shadow-[0_0_14px_rgba(14,165,233,0.22)] hover:shadow-[0_0_20px_rgba(14,165,233,0.4)] hover:border-sky-600',
+        circleBg: 'from-sky-500 to-cyan-600 shadow-[0_0_12px_rgba(14,165,233,0.38)]',
+        subtitleText: 'text-sky-100',
+        statusColor: 'text-sky-700',
+        dotColor: 'bg-sky-500 animate-pulse shadow-[0_0_6px_rgba(14,165,233,0.85)]',
+      };
+    }
+
+    if (line.statusLabel === 'Đã chuyển') {
+      return {
+        cardFrame:
+          'border-slate-300 bg-slate-100/85 opacity-85 hover:opacity-100 hover:border-slate-400 shadow-xs',
+        circleBg: 'from-slate-400 to-slate-500 shadow-sm',
+        subtitleText: 'text-slate-100',
+        statusColor: 'text-slate-600',
+        dotColor: 'bg-slate-400',
+      };
+    }
+
     if (
       line.statusLabel === 'Dừng do Máy hỏng' ||
       line.statusLabel === 'Dừng do Lỗi thao tác' ||
@@ -185,27 +257,47 @@ export function LineNetworkDiagram({
         }`}
         title={`${line.stage} (${line.healthBadge}) — Nhấp thẻ để báo cáo nhanh, hoặc nhấp vào ô Issue để xem chi tiết vấn đề`}
       >
-        <span
-          title={
-            line.characteristic === 'new'
-              ? 'Đặc tính Line: New — Line đang test thử model mới'
-              : 'Đặc tính Line: Mass — Đã đi vào sản xuất hàng loạt'
-          }
-          className={`absolute top-1.5 left-1.5 z-30 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[9px] font-extrabold leading-none whitespace-nowrap shadow-xs ${
-            line.characteristic === 'new'
-              ? 'bg-violet-100 border-violet-300 text-violet-800'
-              : 'bg-sky-100 border-sky-300 text-sky-800'
-          }`}
-        >
+        <div className="absolute top-1.5 left-1.5 right-1.5 z-30 flex items-center justify-between gap-1">
           <span
-            className={`w-1.5 h-1.5 rounded-full ${
-              line.characteristic === 'new' ? 'bg-violet-600' : 'bg-sky-600'
+            title={
+              line.characteristic === 'new'
+                ? 'Đặc tính Line: New — Line đang test thử model mới'
+                : 'Đặc tính Line: Mass — Đã đi vào sản xuất hàng loạt'
+            }
+            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[9px] font-extrabold leading-none whitespace-nowrap shadow-xs ${
+              line.characteristic === 'new'
+                ? 'bg-violet-100 border-violet-300 text-violet-800'
+                : 'bg-sky-100 border-sky-300 text-sky-800'
             }`}
-          />
-          <span className="uppercase tracking-wide">
-            {line.characteristic === 'new' ? 'New · Test' : 'Mass'}
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                line.characteristic === 'new' ? 'bg-violet-600' : 'bg-sky-600'
+              }`}
+            />
+            <span className="uppercase tracking-wide">
+              {line.characteristic === 'new' ? 'New · Test' : 'Mass'}
+            </span>
           </span>
-        </span>
+          <div className="flex items-center gap-1 min-w-0">
+            <span
+              title={`Nhà máy hiện tại: ${getLineFactory(line)}${
+                line.transferHistory && line.transferHistory.length > 0
+                  ? ` · Đã chuyển nhà máy ${line.transferHistory.length} lần (giữ nguyên thông số & lịch sử)`
+                  : ''
+              }`}
+              className="px-1 py-0.5 rounded bg-slate-100 border border-slate-200 text-[8.5px] font-bold text-slate-700 leading-none whitespace-nowrap"
+            >
+              {getShortFactoryLabel(getLineFactory(line))}
+            </span>
+            <span
+              title={`Mã số Line: ${getDefaultLineCode(line)} (Admin có thể sửa)`}
+              className="text-[9px] font-mono font-bold text-slate-500 tracking-tight truncate tabular-nums pr-0.5"
+            >
+              {getDefaultLineCode(line)}
+            </span>
+          </div>
+        </div>
         <div className="flex items-center justify-center gap-1.5 h-9 -mb-1.5 z-20">
           <div
             className={`min-w-[48px] px-1.5 h-8 rounded-lg border-[1.5px] flex flex-col items-center justify-center gap-0.5 transition-colors ${vtTheme.box}`}
@@ -261,6 +353,86 @@ export function LineNetworkDiagram({
             <span className="truncate">{line.leader}</span>
           </span>
           {(() => {
+            const machines = line.keyMachines ?? [];
+            const hasFaultMachine = machines.some((m) => m.status === 'Dừng lỗi');
+            const hasWarnMachine = machines.some(
+              (m) => m.status === 'Cần theo dõi' || m.status === 'Đang bảo trì'
+            );
+            const machineNames =
+              machines.length > 0 ? machines.map((m) => m.name).join(', ') : 'Chưa cấu hình';
+            const machineDetails =
+              machines.length > 0
+                ? machines.map((m) => `${m.name} (${m.ip || '--'})`).join(', ')
+                : 'Chưa cấu hình';
+            return (
+              <span
+                className={`mt-0.5 inline-flex items-center justify-center gap-1 text-[9px] font-medium max-w-full ${
+                  hasFaultMachine
+                    ? 'text-rose-600'
+                    : hasWarnMachine
+                    ? 'text-amber-700'
+                    : 'text-slate-500'
+                }`}
+                title={`Máy chủ chốt trên ${line.name}: ${machineDetails}`}
+              >
+                <Cpu className="w-2.5 h-2.5 shrink-0" />
+                <span className="truncate">
+                  {machines.length > 0 ? `${machines.length} máy: ${machineNames}` : 'Chưa gán máy'}
+                </span>
+              </span>
+            );
+          })()}
+          {(() => {
+            if (line.statusLabel === 'Đang tháo chuyển') {
+              return (
+                <div
+                  className="mt-1.5 w-full rounded-lg bg-sky-50 border border-dashed border-sky-400 px-2 py-1.5 text-[9.5px] leading-tight"
+                  title={
+                    line.transferTarget
+                      ? `Đang tháo chuyển sang ${line.transferTarget}`
+                      : 'Line đang trong quá trình tháo dỡ & di chuyển sang nhà máy khác'
+                  }
+                >
+                  <div className="flex items-center justify-center gap-1 text-sky-700 font-bold">
+                    <Truck className="w-3 h-3 text-sky-600 shrink-0" />
+                    <span className="whitespace-nowrap">Đang tháo chuyển NM</span>
+                  </div>
+                  {line.transferTarget ? (
+                    <div className="mt-0.5 text-[8.5px] font-semibold text-sky-800 truncate">
+                      → {line.transferTarget}
+                    </div>
+                  ) : (
+                    <div className="mt-1 border-t-2 border-dashed border-sky-400" />
+                  )}
+                </div>
+              );
+            }
+
+            if (line.statusLabel === 'Đã chuyển') {
+              return (
+                <div
+                  className="mt-1.5 w-full rounded-lg bg-slate-200/75 border border-slate-300 px-2 py-1.5 text-[9.5px] leading-tight"
+                  title={
+                    line.transferTarget
+                      ? `Đã chuyển sang ${line.transferTarget}`
+                      : 'Line đã hoàn tất chuyển sang nhà máy khác'
+                  }
+                >
+                  <div className="flex items-center justify-center gap-1 text-slate-700 font-bold">
+                    <ArrowRightLeft className="w-3 h-3 text-slate-600 shrink-0" />
+                    <span className="whitespace-nowrap">Đã chuyển nhà máy</span>
+                  </div>
+                  {line.transferTarget ? (
+                    <div className="mt-0.5 text-[8.5px] font-semibold text-slate-600 truncate">
+                      → {line.transferTarget}
+                    </div>
+                  ) : (
+                    <div className="mt-1 h-1.5 rounded-full bg-slate-400/70" />
+                  )}
+                </div>
+              );
+            }
+
             const isMassLine = line.characteristic === 'mas';
             const isSetupDone = isMassLine || line.statusLabel === 'Mass Ready';
             const completed = isSetupDone || isLineCompleted(line);
@@ -432,7 +604,7 @@ export function LineNetworkDiagram({
             Sơ Đồ Tiến Độ Dây Chuyền Sản Xuất (Line Progress &amp; Issues)
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Mô phỏng luồng điều phối từ Trung tâm Kế hoạch Vận hành (KHV) đến {lines.length} dây chuyền sản xuất chính · Viền neon &amp; màu sắc tự động đồng bộ theo tình trạng Line, % Vật Tư và Issue
+            Mô phỏng luồng điều phối từ {activeCenter.name} đến {lines.length} dây chuyền sản xuất chính · Viền neon &amp; màu sắc tự động đồng bộ theo tình trạng Line, % Vật Tư và Issue
           </p>
         </div>
 
@@ -448,7 +620,10 @@ export function LineNetworkDiagram({
           )}
           <button
             type="button"
-            onClick={() => onQuickReportLine(lines[0]?.id || 'line-1')}
+            onClick={() => {
+              if (lines[0]?.id) onQuickReportLine(lines[0].id);
+              else onOpenAddLine();
+            }}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition whitespace-nowrap shrink-0 cursor-pointer"
           >
             <ClipboardEdit className="w-3.5 h-3.5" />
@@ -491,6 +666,14 @@ export function LineNetworkDiagram({
               <span className="w-3 h-3 rounded-full bg-rose-500 inline-block shadow-[0_0_6px_rgba(244,63,94,0.75)]" />
               <span className="text-slate-600 font-medium">Cảnh báo / Nhiều Issue</span>
             </div>
+            <div className="flex items-center gap-1.5 whitespace-nowrap">
+              <span className="w-3 h-3 rounded-sm border-2 border-dashed border-sky-500 bg-sky-50 inline-block" />
+              <span className="text-slate-600 font-medium">Nét đứt: Đang tháo chuyển</span>
+            </div>
+            <div className="flex items-center gap-1.5 whitespace-nowrap">
+              <span className="w-3 h-3 rounded-full bg-slate-400 inline-block" />
+              <span className="text-slate-600 font-medium">Đã chuyển NM</span>
+            </div>
             <span className="text-slate-300 hidden sm:inline">|</span>
             <div className="flex items-center gap-1.5 whitespace-nowrap">
               <span className="px-1.5 py-0.5 rounded bg-violet-100 border border-violet-300 text-violet-800 text-[10px] font-bold">
@@ -504,12 +687,60 @@ export function LineNetworkDiagram({
         </div>
       </div>
 
+      {/* Factory Filter Bar */}
+      <div className="mt-4 flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="inline-flex items-center gap-1 text-xs font-bold text-slate-600 mr-1">
+            <Building2 className="w-3.5 h-3.5 text-blue-600" />
+            <span>Nhà máy:</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setSelectedFactory('all')}
+            className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition cursor-pointer ${
+              selectedFactory === 'all'
+                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+            }`}
+          >
+            Tất cả ({lines.length})
+          </button>
+          {factoryOptions.map((fac) => {
+            const count = lines.filter((l) => getLineFactory(l) === fac).length;
+            const isActive = selectedFactory === fac;
+            return (
+              <button
+                key={fac}
+                type="button"
+                onClick={() => setSelectedFactory(fac)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition cursor-pointer ${
+                  isActive
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                {fac} ({count})
+              </button>
+            );
+          })}
+        </div>
+        {selectedFactory !== 'all' && (
+          <span className="text-[11px] font-medium text-slate-500">
+            Đang hiển thị dây chuyền thuộc <strong className="text-slate-700">{selectedFactory}</strong>
+          </span>
+        )}
+      </div>
+
       {/* Interactive Network Diagram (White Background + Neon Framed Cards) */}
-      <div className="relative mt-5 py-6 px-4 sm:px-5 bg-white rounded-2xl border border-slate-200/80">
+      <div className="relative mt-4 py-6 px-4 sm:px-5 bg-white rounded-2xl border border-slate-200/80">
         <div className="grid grid-cols-12 gap-6 items-center">
-          {/* Central Hub KHV Frame */}
+          {/* Central Hub Frame */}
           <div className="col-span-12 lg:col-span-3 flex flex-col items-center justify-center relative">
-            <div className="w-full max-w-[220px] rounded-2xl border-2 border-cyan-400 bg-white p-4 shadow-[0_0_18px_rgba(6,182,212,0.28)] flex flex-col items-center justify-center">
+            <div
+              className={`w-full max-w-[220px] rounded-2xl border-2 bg-white p-4 flex flex-col items-center justify-center ${
+                HUB_FRAME_BORDER[activeCenter.accentColor]
+              }`}
+            >
               <div className="flex items-center justify-center gap-2 h-10 -mb-1.5 z-20">
                 <div
                   className={`min-w-[54px] px-2 h-8 rounded-lg border-[1.5px] flex flex-col items-center justify-center gap-0.5 transition-colors ${hubVtTheme.box}`}
@@ -528,7 +759,7 @@ export function LineNetworkDiagram({
                 <button
                   type="button"
                   onClick={() => onInspectLineIssues('HUB')}
-                  title={`Nhấp để xem toàn bộ ${totalLineIssues} Issue trên hệ thống`}
+                  title={`Nhấp để xem toàn bộ ${totalLineIssues} Issue trên ${activeCenter.code}`}
                   className={`min-w-[48px] px-2 h-8 rounded-lg border-[1.5px] flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer hover:scale-105 hover:ring-2 hover:ring-rose-400/70 focus-visible:outline-2 focus-visible:outline-rose-600 ${hubIssueTheme.box}`}
                 >
                   <span
@@ -545,20 +776,30 @@ export function LineNetworkDiagram({
               </div>
               <button
                 type="button"
-                onClick={() => onQuickReportLine(lines[0]?.id || 'line-1')}
-                className="w-24 h-24 rounded-full bg-gradient-to-br from-cyan-500 via-blue-600 to-indigo-700 text-white flex flex-col items-center justify-center shadow-[0_0_16px_rgba(37,99,235,0.4)] border-2 border-white pulse-ring shrink-0 hover:scale-105 transition-transform cursor-pointer"
+                onClick={() => {
+                  if (lines[0]?.id) onQuickReportLine(lines[0].id);
+                  else onOpenAddLine();
+                }}
+                className={`w-24 h-24 rounded-full bg-gradient-to-br text-white flex flex-col items-center justify-center border-2 border-white pulse-ring shrink-0 hover:scale-105 transition-transform cursor-pointer px-2 ${
+                  HUB_CIRCLE_GRADIENT[activeCenter.accentColor]
+                }`}
                 title="Nhấp để mở bảng báo cáo nhanh cho các dây chuyền"
               >
-                <span className="text-[9px] uppercase tracking-wider text-cyan-100 font-semibold">
+                <span className="text-[9px] uppercase tracking-wider text-white/85 font-semibold">
                   TRUNG TÂM
                 </span>
-                <span className="text-xl font-extrabold tracking-tight leading-none my-0.5">
-                  KHV
+                <span className="text-lg font-extrabold tracking-tight leading-none my-0.5 truncate max-w-[78px]">
+                  {activeCenter.code}
                 </span>
-                <span className="text-[9px] text-blue-100">Hub Vận Hành</span>
+                <span className="text-[8.5px] text-white/90 truncate max-w-[78px]">
+                  {activeCenter.subtitle}
+                </span>
               </button>
               <div className="mt-2.5 text-center">
-                <span className="text-xs text-slate-600 font-semibold">{lines.length} line On3</span>
+                <span className="text-xs text-slate-600 font-semibold">
+                  {visibleLines.length} line{' '}
+                  {selectedFactory !== 'all' ? `· ${getShortFactoryLabel(selectedFactory)}` : 'On3'}
+                </span>
               </div>
             </div>
 
@@ -574,25 +815,38 @@ export function LineNetworkDiagram({
 
           {/* Lines Grid with Flow Bus */}
           <div className="col-span-12 lg:col-span-9 flex flex-col gap-4 relative lg:pl-5 lg:border-l-2 lg:border-dashed lg:border-cyan-300">
-            <div className="relative">
-              <div
-                aria-hidden="true"
-                className="hidden md:block absolute top-1/2 -translate-y-1/2 left-[8%] right-[8%] border-t-2 border-dashed border-cyan-300 pointer-events-none z-0"
-              />
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3.5 relative z-10">
-                {firstRow.map(renderLineNode)}
+            {visibleLines.length === 0 ? (
+              <div className="rounded-xl border-2 border-dashed border-slate-200 bg-slate-50/70 py-10 px-4 text-center space-y-2">
+                <p className="text-sm font-bold text-slate-700">
+                  Chưa có dây chuyền nào tại {selectedFactory}
+                </p>
+                <p className="text-xs text-slate-500">
+                  Khi Line chuyển sang trạng thái Đã chuyển, Admin có thể thao tác chuyển nhà máy cho Line về đây (giữ nguyên thông số &amp; lịch sử).
+                </p>
               </div>
-            </div>
-            {remainingRows.length > 0 && (
-              <div className="relative">
-                <div
-                  aria-hidden="true"
-                  className="hidden md:block absolute top-1/2 -translate-y-1/2 left-[8%] right-[8%] border-t-2 border-dashed border-cyan-300 pointer-events-none z-0"
-                />
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3.5 relative z-10">
-                  {remainingRows.map(renderLineNode)}
+            ) : (
+              <>
+                <div className="relative">
+                  <div
+                    aria-hidden="true"
+                    className="hidden md:block absolute top-1/2 -translate-y-1/2 left-[8%] right-[8%] border-t-2 border-dashed border-cyan-300 pointer-events-none z-0"
+                  />
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3.5 relative z-10">
+                    {firstRow.map(renderLineNode)}
+                  </div>
                 </div>
-              </div>
+                {remainingRows.length > 0 && (
+                  <div className="relative">
+                    <div
+                      aria-hidden="true"
+                      className="hidden md:block absolute top-1/2 -translate-y-1/2 left-[8%] right-[8%] border-t-2 border-dashed border-cyan-300 pointer-events-none z-0"
+                    />
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3.5 relative z-10">
+                      {remainingRows.map(renderLineNode)}
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

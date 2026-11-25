@@ -188,13 +188,21 @@ export function IssuesSection({
             <div className="max-h-72 overflow-y-auto pr-1 space-y-3">
               {lines.map((line) => {
                 const badgeClass =
-                  line.healthTone === 'rose'
+                  line.statusLabel === 'Đang tháo chuyển'
+                    ? 'bg-sky-100 text-sky-800 border border-dashed border-sky-400'
+                    : line.statusLabel === 'Đã chuyển'
+                    ? 'bg-slate-200 text-slate-700'
+                    : line.healthTone === 'rose'
                     ? 'bg-rose-100 text-rose-800'
                     : line.healthTone === 'amber'
                     ? 'bg-amber-100 text-amber-800'
                     : 'bg-emerald-100 text-emerald-800';
                 const barClass =
-                  line.healthTone === 'rose' || line.healthPercent < 65
+                  line.statusLabel === 'Đang tháo chuyển'
+                    ? 'bg-sky-500'
+                    : line.statusLabel === 'Đã chuyển'
+                    ? 'bg-slate-400'
+                    : line.healthTone === 'rose' || line.healthPercent < 65
                     ? 'bg-amber-500'
                     : 'bg-blue-600';
 

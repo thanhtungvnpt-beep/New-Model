@@ -11,6 +11,8 @@ export type LineHealthStatus =
   | 'Dừng do Lỗi khác'
   | 'Dừng do Hết Plan'
   | 'Dừng hoàn thành Plan'
+  | 'Đang tháo chuyển'
+  | 'Đã chuyển'
   | 'Chờ Vật Tư'
   | 'Đủ Vật Tư'
   | 'Đang Lắp Ráp'
@@ -33,6 +35,8 @@ export const MASS_LINE_STATUSES: LineHealthStatus[] = [
   'Dừng do Lỗi khác',
   'Dừng do Hết Plan',
   'Dừng hoàn thành Plan',
+  'Đang tháo chuyển',
+  'Đã chuyển',
 ];
 
 export const MASS_STOP_ISSUE_STATUSES: LineHealthStatus[] = [
@@ -61,6 +65,8 @@ export const NEW_LINE_STATUSES: LineHealthStatus[] = [
   'Test Lại',
   'Mass Ready',
   'Tạm Hoãn',
+  'Đang tháo chuyển',
+  'Đã chuyển',
 ];
 
 export type LineCharacteristic = 'new' | 'mas';
@@ -71,11 +77,46 @@ export interface LineSetupTimeline {
   currentDate?: string; // Ngày hiện tại (YYYY-MM-DD), mặc định là hôm nay
 }
 
+export type KeyMachineStatus =
+  | 'Hoạt động tốt'
+  | 'Cần theo dõi'
+  | 'Đang bảo trì'
+  | 'Dừng lỗi';
+
+export interface LineKeyMachine {
+  id: string;
+  name: string;
+  ip: string;
+  role?: string;
+  status: KeyMachineStatus;
+  note?: string;
+}
+
+export interface LineTransferHistoryEntry {
+  id: string;
+  timestamp: string;
+  fromFactory: string;
+  toFactory: string;
+  performedBy: string;
+  note?: string;
+  preservedSnapshot: {
+    lineCode: string;
+    characteristic: LineCharacteristic;
+    vtPercent: number;
+    healthPercent: number;
+    issueCount: number;
+    machinesCount: number;
+    leader: string;
+  };
+}
+
 export interface ProductionLine {
   id: string;
+  lineCode?: string;
   name: string;
   stage: string;
   shortStage: string;
+  factory?: string;
   characteristic: LineCharacteristic;
   vtPercent: number;
   healthPercent: number;
@@ -85,7 +126,10 @@ export interface ProductionLine {
   healthTone: 'emerald' | 'amber' | 'rose';
   leader: string;
   lastNote?: string;
+  transferTarget?: string;
+  transferHistory?: LineTransferHistoryEntry[];
   updatedAt?: string;
+  keyMachines?: LineKeyMachine[];
   setupTimeline?: LineSetupTimeline;
 }
 
@@ -153,3 +197,20 @@ export interface ToastNotification {
   message: string;
   variant: 'emerald' | 'blue' | 'amber';
 }
+
+export type CenterAccentColor = 'blue' | 'indigo' | 'emerald' | 'amber';
+
+export interface ProductionCenter {
+  id: string;
+  code: string;
+  name: string;
+  subtitle: string;
+  accentColor: CenterAccentColor;
+  selectedProject: string;
+  lines: ProductionLine[];
+  pipelineItems: PipelineItem[];
+  issues: IssueItem[];
+  auditLogs: AuditLogEntry[];
+}
+
+export type AppScreen = 'overview' | 'supply-chain';

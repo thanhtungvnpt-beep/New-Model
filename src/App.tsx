@@ -1,4 +1,4 @@
-import { CheckCircle2, X } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, X } from 'lucide-react';
 import { useState } from 'react';
 import { IssuesSection } from './components/IssuesSection';
 import { KpiAndToolbar } from './components/KpiAndToolbar';
@@ -11,6 +11,7 @@ import {
   AdminAuthModal,
   AlertNotificationModal,
   AuditHistoryModal,
+  CenterManagementModal,
   ExportIssuesModal,
   IssueDetailModal,
 } from './components/modals/GovernanceModals';
@@ -23,20 +24,26 @@ import {
   VendorFieldReportModal,
 } from './components/modals/OperationModals';
 import {
-  INITIAL_AUDIT_LOGS,
-  INITIAL_ISSUES,
-  INITIAL_LINES,
-  INITIAL_PIPELINE_ITEMS,
+  INITIAL_CENTERS,
+  createInitialCenterData,
   downloadCsvFile,
   formatLineTimestamp,
+  getDefaultLineCode,
+  getLineFactory,
+  getStatusHealthMeta,
 } from './data/initialData';
 import {
+  AppScreen,
   AuditLogEntry,
+  CenterAccentColor,
   isMassStopIssueStatus,
   IssueItem,
   IssueSeverity,
+  LineHealthStatus,
+  LineTransferHistoryEntry,
   OperationTab,
   PipelineItem,
+  ProductionCenter,
   ProductionLine,
   ToastNotification,
 } from './types/production';
@@ -50,15 +57,54 @@ function getNextIssueId(list: IssueItem[], offset = 0): string {
 }
 
 export default function App() {
-  const [selectedProject, setSelectedProject] = useState('KHV-2025');
-  const [lines, setLines] = useState<ProductionLine[]>(INITIAL_LINES);
-  const [pipelineItems, setPipelineItems] = useState<PipelineItem[]>(INITIAL_PIPELINE_ITEMS);
-  const [issues, setIssues] = useState<IssueItem[]>(INITIAL_ISSUES);
-  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(INITIAL_AUDIT_LOGS);
+  const [centers, setCenters] = useState<ProductionCenter[]>(INITIAL_CENTERS);
+  const [activeCenterId, setActiveCenterId] = useState<string>(INITIAL_CENTERS[0].id);
+  const activeCenter = centers.find((c) => c.id === activeCenterId) || centers[0];
+
+  const { selectedProject, lines, pipelineItems, issues, auditLogs } = activeCenter;
+
+  const updateActiveCenter = (updater: (center: ProductionCenter) => ProductionCenter) => {
+    setCenters((prev) => prev.map((c) => (c.id === activeCenter.id ? updater(c) : c)));
+  };
+
+  const setSelectedProject = (proj: string) =>
+    updateActiveCenter((c) => ({ ...c, selectedProject: proj }));
+
+  const setLines = (
+    updater: ProductionLine[] | ((prev: ProductionLine[]) => ProductionLine[])
+  ) =>
+    updateActiveCenter((c) => ({
+      ...c,
+      lines: typeof updater === 'function' ? updater(c.lines) : updater,
+    }));
+
+  const setPipelineItems = (
+    updater: PipelineItem[] | ((prev: PipelineItem[]) => PipelineItem[])
+  ) =>
+    updateActiveCenter((c) => ({
+      ...c,
+      pipelineItems: typeof updater === 'function' ? updater(c.pipelineItems) : updater,
+    }));
+
+  const setIssues = (updater: IssueItem[] | ((prev: IssueItem[]) => IssueItem[])) =>
+    updateActiveCenter((c) => ({
+      ...c,
+      issues: typeof updater === 'function' ? updater(c.issues) : updater,
+    }));
+
+  const setAuditLogs = (
+    updater: AuditLogEntry[] | ((prev: AuditLogEntry[]) => AuditLogEntry[])
+  ) =>
+    updateActiveCenter((c) => ({
+      ...c,
+      auditLogs: typeof updater === 'function' ? updater(c.auditLogs) : updater,
+    }));
+
   const [selectedLineFilter, setSelectedLineFilter] = useState('all');
+  const [activeScreen, setActiveScreen] = useState<AppScreen>('overview');
 
   const [isAdminMode, setIsAdminMode] = useState(false);
-  const [adminAuthIntent, setAdminAuthIntent] = useState<'demand' | 'line'>('demand');
+  const [adminAuthIntent, setAdminAuthIntent] = useState<'demand' | 'line' | 'center'>('demand');
   const [lastAdminReason, setLastAdminReason] = useState('');
 
   // Modals state
@@ -73,6 +119,7 @@ export default function App() {
   const [exportIssuesOpen, setExportIssuesOpen] = useState(false);
   const [alertModalOpen, setAlertModalOpen] = useState(false);
   const [addLineOpen, setAddLineOpen] = useState(false);
+  const [centerManagerOpen, setCenterManagerOpen] = useState(false);
   const [editingIssueId, setEditingIssueId] = useState<string | null>(null);
   const [quickReportLineId, setQuickReportLineId] = useState<string | null>(null);
   const [inspectIssuesTarget, setInspectIssuesTarget] = useState<string | null>(null);
@@ -171,7 +218,7 @@ export default function App() {
           version: `v1.${prev.length}`,
           isCurrent: true,
           timestamp: timeStr,
-          author: 'Admin_KHV',
+          author: `Admin_${activeCenter.code}`,
           reason: lastAdminReason || 'Điều chỉnh định mức Target Demand trực tiếp',
           changes: diffs.join(', '),
           tone: 'blue',
@@ -310,7 +357,7 @@ export default function App() {
 
   const handleExportFullReport = () => {
     downloadCsvFile(
-      `KHV_Bao_Cao_Tien_Do_${selectedProject}.csv`,
+      `${activeCenter.code}_Bao_Cao_Tien_Do_${selectedProject}.csv`,
       ['Item No', 'Tên Item', 'Target Demand', 'Cần mua', 'Đã về kho', 'Nhập Vendor', 'Set lên Line', 'Line Test', 'Issue Mua Hàng'],
       pipelineItems.map((it) => [
         it.itemNo,
@@ -329,7 +376,7 @@ export default function App() {
 
   const handleExportAllIssues = () => {
     downloadCsvFile(
-      'KHV_Issues_Tracker_Line1_to_10.csv',
+      `${activeCenter.code}_Issues_Tracker.csv`,
       ['Mã SC', 'Dây Chuyền', 'Mã Item', 'Vấn Đề', 'Mức Độ', 'Phụ Trách', 'Tồn Đọng', 'Tiến Độ (%)'],
       issues.map((i) => [
         i.id,
@@ -421,7 +468,7 @@ export default function App() {
           version: `v1.${prev.length}`,
           isCurrent: true,
           timestamp: timeStr,
-          author: 'Admin_KHV',
+          author: `Admin_${activeCenter.code}`,
           reason:
             lastAdminReason ||
             (charChanged
@@ -429,7 +476,7 @@ export default function App() {
                   prevLine.characteristic === 'new' ? 'New' : 'Mass'
                 } -> ${updatedLine.characteristic === 'new' ? 'New' : 'Mass'})`
               : `Chỉnh sửa thông tin cấu hình ${updatedLine.name}`),
-          changes: `${prevLine.name} (${prevLine.shortStage}, ${prevLine.leader}${charChangeText}) -> ${updatedLine.name} (${updatedLine.shortStage}, ${updatedLine.leader})`,
+          changes: `${prevLine.name} (${prevLine.lineCode || prevLine.id}, ${prevLine.shortStage}, ${prevLine.leader}${charChangeText}) -> ${updatedLine.name} (${updatedLine.lineCode || updatedLine.id}, ${updatedLine.shortStage}, ${updatedLine.leader})`,
           tone: 'blue',
         },
         ...prev.map((entry) => ({ ...entry, isCurrent: false })),
@@ -563,20 +610,260 @@ export default function App() {
         version: `v1.${prev.length}`,
         isCurrent: true,
         timestamp: timeStr,
-        author: 'Admin_KHV',
+        author: `Admin_${activeCenter.code}`,
         reason: lastAdminReason || `Gỡ bỏ dây chuyền ${target.name} khỏi hệ thống`,
         changes: `Xóa ${target.name} (${target.stage})`,
         tone: 'amber',
       },
       ...prev.map((entry) => ({ ...entry, isCurrent: false })),
     ]);
-    pushToast('Đã xóa dây chuyền', `${target.name} đã được gỡ bỏ khỏi sơ đồ KHV.`, 'amber');
+    pushToast(
+      'Đã xóa dây chuyền',
+      `${target.name} đã được gỡ bỏ khỏi sơ đồ ${activeCenter.code}.`,
+      'amber'
+    );
+  };
+
+  const handleTransferLineFactory = (
+    lineSnapshot: ProductionLine,
+    originalLineName: string,
+    destination: {
+      targetCenterId: string;
+      toFactory: string;
+      switchToTargetCenter?: boolean;
+    },
+    arrivalStatus: LineHealthStatus,
+    transferNote?: string
+  ): LineTransferHistoryEntry => {
+    const sourceFactory = getLineFactory(lineSnapshot);
+    const targetCenter =
+      centers.find((c) => c.id === destination.targetCenterId) || activeCenter;
+    const isCrossCenter = targetCenter.id !== activeCenter.id;
+
+    const fromFactoryLabel = isCrossCenter
+      ? `${activeCenter.code} · ${sourceFactory}`
+      : sourceFactory;
+    const toFactoryLabel = isCrossCenter
+      ? `${targetCenter.code} · ${destination.toFactory}`
+      : destination.toFactory;
+
+    const meta = getStatusHealthMeta(arrivalStatus, lineSnapshot.issueCount);
+    const nowTimestamp = formatLineTimestamp();
+
+    const historyEntry: LineTransferHistoryEntry = {
+      id: `TRF-${Date.now()}`,
+      timestamp: nowTimestamp,
+      fromFactory: fromFactoryLabel,
+      toFactory: toFactoryLabel,
+      performedBy: `Admin_${activeCenter.code}`,
+      note: transferNote,
+      preservedSnapshot: {
+        lineCode: getDefaultLineCode(lineSnapshot),
+        characteristic: lineSnapshot.characteristic,
+        vtPercent: lineSnapshot.vtPercent,
+        healthPercent: lineSnapshot.healthPercent,
+        issueCount: lineSnapshot.issueCount,
+        machinesCount: lineSnapshot.keyMachines?.length ?? 0,
+        leader: lineSnapshot.leader,
+      },
+    };
+
+    const transferredLine: ProductionLine = {
+      ...lineSnapshot,
+      factory: destination.toFactory,
+      transferTarget: undefined,
+      statusLabel: arrivalStatus,
+      healthBadge: meta.healthBadge,
+      healthTone: meta.healthTone,
+      updatedAt: nowTimestamp,
+      transferHistory: [historyEntry, ...(lineSnapshot.transferHistory || [])],
+    };
+
+    const now = new Date();
+    const auditTime = `Hôm nay, ${now.toLocaleTimeString('vi-VN', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+
+    if (isCrossCenter) {
+      const movedIssues = activeCenter.issues
+        .filter((iss) => iss.line === originalLineName || iss.line === lineSnapshot.name)
+        .map((iss) => ({ ...iss, line: transferredLine.name }));
+      const movedIssueIds = new Set(movedIssues.map((iss) => iss.id));
+
+      setCenters((prev) =>
+        prev.map((c) => {
+          if (c.id === activeCenter.id) {
+            return {
+              ...c,
+              lines: c.lines.filter((l) => l.id !== lineSnapshot.id),
+              issues: c.issues.filter((iss) => !movedIssueIds.has(iss.id)),
+              auditLogs: [
+                {
+                  version: `v1.${c.auditLogs.length}`,
+                  isCurrent: true,
+                  timestamp: auditTime,
+                  author: `Admin_${activeCenter.code}`,
+                  reason:
+                    transferNote ||
+                    lastAdminReason ||
+                    `Điều chuyển ${lineSnapshot.name} sang Trung tâm ${targetCenter.code}`,
+                  changes: `${lineSnapshot.name} (${getDefaultLineCode(lineSnapshot)}): ${fromFactoryLabel} -> ${toFactoryLabel} · Chuyển kèm ${movedIssues.length} hồ sơ sự cố, VT ${lineSnapshot.vtPercent}%, ${lineSnapshot.keyMachines?.length ?? 0} máy`,
+                  tone: 'blue',
+                },
+                ...c.auditLogs.map((entry) => ({ ...entry, isCurrent: false })),
+              ],
+            };
+          }
+          if (c.id === targetCenter.id) {
+            return {
+              ...c,
+              lines: [...c.lines, transferredLine],
+              issues: [...movedIssues, ...c.issues],
+              auditLogs: [
+                {
+                  version: `v1.${c.auditLogs.length}`,
+                  isCurrent: true,
+                  timestamp: auditTime,
+                  author: `Admin_${activeCenter.code}`,
+                  reason:
+                    transferNote ||
+                    `Tiếp nhận ${transferredLine.name} điều chuyển từ Trung tâm ${activeCenter.code}`,
+                  changes: `Nhận ${transferredLine.name} (${getDefaultLineCode(transferredLine)}) vào ${destination.toFactory} · Bảo toàn VT ${transferredLine.vtPercent}%, ${movedIssues.length} sự cố, ${transferredLine.keyMachines?.length ?? 0} máy`,
+                  tone: 'blue',
+                },
+                ...c.auditLogs.map((entry) => ({ ...entry, isCurrent: false })),
+              ],
+            };
+          }
+          return c;
+        })
+      );
+
+      if (
+        selectedLineFilter === originalLineName ||
+        selectedLineFilter === lineSnapshot.name
+      ) {
+        setSelectedLineFilter('all');
+      }
+      setQuickReportLineId(null);
+      setInspectIssuesTarget(null);
+      setEditingIssueId(null);
+
+      if (destination.switchToTargetCenter) {
+        setActiveCenterId(targetCenter.id);
+        setSelectedLineFilter('all');
+      }
+
+      pushToast(
+        `Đã chuyển ${transferredLine.name} sang Trung tâm ${targetCenter.code}`,
+        `Bảo toàn 100% thông số, ${transferredLine.keyMachines?.length ?? 0} máy chủ chốt & ${movedIssues.length} hồ sơ sự cố tại ${destination.toFactory}.`,
+        'blue'
+      );
+
+      return historyEntry;
+    }
+
+    setLines((prev) =>
+      prev.map((l) => (l.id === lineSnapshot.id ? transferredLine : l))
+    );
+
+    setAuditLogs((prev) => [
+      {
+        version: `v1.${prev.length}`,
+        isCurrent: true,
+        timestamp: auditTime,
+        author: `Admin_${activeCenter.code}`,
+        reason:
+          transferNote ||
+          lastAdminReason ||
+          `Chuyển nhà máy cho ${lineSnapshot.name} (giữ nguyên thông số & lịch sử)`,
+        changes: `${lineSnapshot.name} (${getDefaultLineCode(lineSnapshot)}): ${fromFactoryLabel} -> ${toFactoryLabel} · Bảo toàn VT ${lineSnapshot.vtPercent}%, ${lineSnapshot.issueCount} Issue, ${lineSnapshot.keyMachines?.length ?? 0} máy`,
+        tone: 'blue',
+      },
+      ...prev.map((entry) => ({ ...entry, isCurrent: false })),
+    ]);
+
+    pushToast(
+      `Đã chuyển ${lineSnapshot.name} sang ${destination.toFactory}`,
+      `Giữ nguyên toàn bộ thông số, máy chủ chốt & lịch sử sự cố (${arrivalStatus}).`,
+      'blue'
+    );
+
+    return historyEntry;
+  };
+
+  const handleSelectCenter = (centerId: string) => {
+    const target = centers.find((c) => c.id === centerId);
+    if (!target || target.id === activeCenter.id) return;
+    setActiveCenterId(centerId);
+    setSelectedLineFilter('all');
+    setQuickReportLineId(null);
+    setInspectIssuesTarget(null);
+    setEditingIssueId(null);
+    pushToast(
+      `Chuyển sang Trung tâm ${target.code}`,
+      `${target.name} (${target.lines.length} Line).`,
+      'blue'
+    );
+  };
+
+  const handleAddCenter = (payload: {
+    code: string;
+    name: string;
+    subtitle: string;
+    accentColor: CenterAccentColor;
+    initialLineCount: number;
+  }) => {
+    const newCenter = createInitialCenterData(payload);
+    setCenters((prev) => [...prev, newCenter]);
+    setActiveCenterId(newCenter.id);
+    setSelectedLineFilter('all');
+    pushToast(
+      `Đã mở Trung tâm ${newCenter.code}`,
+      `${newCenter.name} đã sẵn sàng với ${newCenter.lines.length} dây chuyền.`,
+      'emerald'
+    );
+  };
+
+  const handleDeleteCenter = (centerId: string) => {
+    if (centers.length <= 1) return;
+    const target = centers.find((c) => c.id === centerId);
+    if (!target) return;
+    const remaining = centers.filter((c) => c.id !== centerId);
+    setCenters(remaining);
+    if (activeCenter.id === centerId && remaining[0]) {
+      setActiveCenterId(remaining[0].id);
+      setSelectedLineFilter('all');
+      setQuickReportLineId(null);
+      setInspectIssuesTarget(null);
+      setEditingIssueId(null);
+    }
+    pushToast(
+      `Đã xóa Trung tâm ${target.code}`,
+      `${target.name} đã được gỡ bỏ khỏi hệ thống quản trị.`,
+      'amber'
+    );
   };
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-800">
       <TopNav
+        centers={centers}
+        activeCenter={activeCenter}
+        activeScreen={activeScreen}
+        isAdminMode={isAdminMode}
         selectedProject={selectedProject}
+        onSelectCenter={handleSelectCenter}
+        onSelectScreen={setActiveScreen}
+        onOpenCenterManager={() => {
+          if (isAdminMode) {
+            setCenterManagerOpen(true);
+          } else {
+            setAdminAuthIntent('center');
+            setAdminAuthOpen(true);
+          }
+        }}
         onSelectProject={(proj) => {
           setSelectedProject(proj);
           pushToast('Chuyển đổi dự án', `Đang hiển thị dữ liệu cho dự án ${proj}.`, 'blue');
@@ -586,96 +873,152 @@ export default function App() {
       />
 
       <main className="flex-1 max-w-[1600px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        <KpiAndToolbar
-          lines={lines}
-          issues={issues}
-          pipelineItems={pipelineItems}
-          onOpenPurchasing={() => {
-            setPurchasingFocusItem(null);
-            setPurchasingOpen(true);
-          }}
-          onOpenOperationModal={(tab) => {
-            setOpModalTab(tab);
-            setOpModalOpen(true);
-          }}
-          onOpenVendorField={() => setVendorFieldOpen(true)}
-          onDownloadTemplates={() => handleDownloadTemplate('Bo_Bieu_Mau_San_Xuat_KHV.csv')}
-          onOpenAlertModal={() => setAlertModalOpen(true)}
-        />
+        {activeScreen === 'overview' ? (
+          <>
+            <KpiAndToolbar
+              lines={lines}
+              issues={issues}
+              pipelineItems={pipelineItems}
+              onOpenPurchasing={() => {
+                setPurchasingFocusItem(null);
+                setPurchasingOpen(true);
+              }}
+              onOpenOperationModal={(tab) => {
+                setOpModalTab(tab);
+                setOpModalOpen(true);
+              }}
+              onOpenVendorField={() => setVendorFieldOpen(true)}
+              onDownloadTemplates={() =>
+                handleDownloadTemplate(`Bo_Bieu_Mau_San_Xuat_${activeCenter.code}.csv`)
+              }
+              onOpenAlertModal={() => setAlertModalOpen(true)}
+              onOpenSupplyChainScreen={() => setActiveScreen('supply-chain')}
+            />
 
-        <LineNetworkDiagram
-          lines={lines}
-          selectedLineFilter={selectedLineFilter}
-          isAdminMode={isAdminMode}
-          onQuickReportLine={(lineId) => setQuickReportLineId(lineId)}
-          onInspectLineIssues={(target) => setInspectIssuesTarget(target)}
-          onAdminEditLine={() => {
-            if (isAdminMode) {
-              setQuickReportLineId(lines[0]?.id || 'line-1');
-            } else {
-              setAdminAuthIntent('line');
-              setAdminAuthOpen(true);
-            }
-          }}
-          onClearLineFilter={() => setSelectedLineFilter('all')}
-          onOpenAddLine={() => setAddLineOpen(true)}
-        />
+            <LineNetworkDiagram
+              activeCenter={activeCenter}
+              lines={lines}
+              selectedLineFilter={selectedLineFilter}
+              isAdminMode={isAdminMode}
+              onQuickReportLine={(lineId) => setQuickReportLineId(lineId)}
+              onInspectLineIssues={(target) => setInspectIssuesTarget(target)}
+              onAdminEditLine={() => {
+                if (isAdminMode) {
+                  setQuickReportLineId(lines[0]?.id || null);
+                } else {
+                  setAdminAuthIntent('line');
+                  setAdminAuthOpen(true);
+                }
+              }}
+              onClearLineFilter={() => setSelectedLineFilter('all')}
+              onOpenAddLine={() => setAddLineOpen(true)}
+            />
 
-        <PipelineStepper
-          items={pipelineItems}
-          onOpenPurchasing={(itemNo) => {
-            setPurchasingFocusItem(itemNo ?? null);
-            setPurchasingOpen(true);
-          }}
-          onOpenVendorField={() => setVendorFieldOpen(true)}
-          onOpenExportIssues={() => setExportIssuesOpen(true)}
-          onOpenIssueDetail={(issueId) => setEditingIssueId(issueId)}
-        />
+            <TargetDemandSpecs
+              items={pipelineItems}
+              isAdminMode={isAdminMode}
+              onRequestAdminAuth={() => {
+                setAdminAuthIntent('demand');
+                setAdminAuthOpen(true);
+              }}
+              onExitAdminMode={() => setIsAdminMode(false)}
+              onSaveDemands={handleSaveTargetDemands}
+              onOpenAuditHistory={() => setAuditHistoryOpen(true)}
+              onOpenUploadDemand={() => setUploadDemandOpen(true)}
+              onDownloadTemplate={() => handleDownloadTemplate('Template_Target_Demand_Line.csv')}
+              onExportSpecs={() =>
+                downloadCsvFile(
+                  `Target_Demand_Specs_${activeCenter.code}.csv`,
+                  ['Item No', 'Tên Item', 'Target Demand'],
+                  pipelineItems.map((it) => [it.itemNo, it.name, it.targetDemand])
+                )
+              }
+            />
 
-        <TargetDemandSpecs
-          items={pipelineItems}
-          isAdminMode={isAdminMode}
-          onRequestAdminAuth={() => {
-            setAdminAuthIntent('demand');
-            setAdminAuthOpen(true);
-          }}
-          onExitAdminMode={() => setIsAdminMode(false)}
-          onSaveDemands={handleSaveTargetDemands}
-          onOpenAuditHistory={() => setAuditHistoryOpen(true)}
-          onOpenUploadDemand={() => setUploadDemandOpen(true)}
-          onDownloadTemplate={() => handleDownloadTemplate('Template_Target_Demand_Line.csv')}
-          onExportSpecs={() =>
-            downloadCsvFile(
-              'Target_Demand_Specs_KHV.csv',
-              ['Item No', 'Tên Item', 'Target Demand'],
-              pipelineItems.map((it) => [it.itemNo, it.name, it.targetDemand])
-            )
-          }
-        />
+            <IssuesSection
+              issues={issues}
+              lines={lines}
+              selectedLineFilter={selectedLineFilter}
+              onChangeLineFilter={setSelectedLineFilter}
+              onOpenIssueDetail={(issueId) => setEditingIssueId(issueId)}
+              onOpenAddIssue={() => {
+                setOpModalTab('issue');
+                setOpModalOpen(true);
+              }}
+              onOpenExportIssues={() => setExportIssuesOpen(true)}
+              onExportAllIssues={handleExportAllIssues}
+              onOpenAlertModal={() => setAlertModalOpen(true)}
+              onRefreshData={() =>
+                pushToast(
+                  'Làm mới dữ liệu',
+                  `Đã đồng bộ dữ liệu từ ${lines.length} dây chuyền sản xuất.`,
+                  'blue'
+                )
+              }
+            />
+          </>
+        ) : (
+          <>
+            <div className="bg-white rounded-xl border border-slate-200 px-5 py-4 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setActiveScreen('overview')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg transition cursor-pointer"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Quay lại Sơ Đồ Dây Chuyền</span>
+                </button>
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900">
+                    Màn Hình Tiến Độ Chuỗi Cung Ứng &amp; Lắp Ráp — Trung Tâm {activeCenter.code}
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    {activeCenter.name} · Dự án {selectedProject} · Theo dõi 6 trạm từ Target Demand đến QA Line Test
+                  </p>
+                </div>
+              </div>
 
-        <IssuesSection
-          issues={issues}
-          lines={lines}
-          selectedLineFilter={selectedLineFilter}
-          onChangeLineFilter={setSelectedLineFilter}
-          onOpenIssueDetail={(issueId) => setEditingIssueId(issueId)}
-          onOpenAddIssue={() => {
-            setOpModalTab('issue');
-            setOpModalOpen(true);
-          }}
-          onOpenExportIssues={() => setExportIssuesOpen(true)}
-          onExportAllIssues={handleExportAllIssues}
-          onOpenAlertModal={() => setAlertModalOpen(true)}
-          onRefreshData={() =>
-            pushToast('Làm mới dữ liệu', `Đã đồng bộ dữ liệu từ ${lines.length} dây chuyền sản xuất.`, 'blue')
-          }
-        />
+              <div className="flex items-center gap-4 text-xs font-semibold text-slate-600 tabular-nums flex-wrap">
+                <span>
+                  Tổng hạng mục:{' '}
+                  <strong className="text-slate-900">{pipelineItems.length}</strong>
+                </span>
+                <span>
+                  Đã về kho:{' '}
+                  <strong className="text-blue-700">
+                    {pipelineItems.reduce((sum, it) => sum + it.inWarehouse, 0)} /{' '}
+                    {pipelineItems.reduce((sum, it) => sum + it.targetDemand, 0)}
+                  </strong>
+                </span>
+                <span>
+                  Đạt Line Test:{' '}
+                  <strong className="text-emerald-700">
+                    {pipelineItems.reduce((sum, it) => sum + it.lineTested, 0)} /{' '}
+                    {pipelineItems.reduce((sum, it) => sum + it.targetDemand, 0)}
+                  </strong>
+                </span>
+              </div>
+            </div>
+
+            <PipelineStepper
+              items={pipelineItems}
+              onOpenPurchasing={(itemNo) => {
+                setPurchasingFocusItem(itemNo ?? null);
+                setPurchasingOpen(true);
+              }}
+              onOpenVendorField={() => setVendorFieldOpen(true)}
+              onOpenExportIssues={() => setExportIssuesOpen(true)}
+              onOpenIssueDetail={(issueId) => setEditingIssueId(issueId)}
+            />
+          </>
+        )}
       </main>
 
       <footer className="bg-white border-t border-slate-200 mt-10 py-4 text-xs text-slate-500">
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2">
           <p>
-            © 2026 KHV Production Management System. Bản quyền thuộc Bộ phận Kế hoạch &amp; Điều hành Sản xuất.
+            © 2026 {activeCenter.code} Production Management System. Bản quyền thuộc Bộ phận Kế hoạch &amp; Điều hành Sản xuất.
           </p>
           <div className="flex items-center gap-4 text-xs font-medium text-slate-600">
             <button
@@ -708,6 +1051,8 @@ export default function App() {
 
       <LineQuickReportModal
         isOpen={quickReportLineId !== null}
+        centers={centers}
+        activeCenter={activeCenter}
         lines={lines}
         initialLineId={quickReportLineId}
         isAdminMode={isAdminMode}
@@ -718,6 +1063,7 @@ export default function App() {
         onExitAdminMode={() => setIsAdminMode(false)}
         onClose={() => setQuickReportLineId(null)}
         onSaveLineReport={handleSaveLineQuickReport}
+        onTransferLineFactory={handleTransferLineFactory}
         onDeleteLine={handleDeleteLine}
         onFilterLineIssues={(lineName) => {
           setSelectedLineFilter(lineName);
@@ -730,6 +1076,7 @@ export default function App() {
 
       <LineIssuesModal
         isOpen={inspectIssuesTarget !== null}
+        centerCode={activeCenter.code}
         targetLine={
           inspectIssuesTarget && inspectIssuesTarget !== 'HUB'
             ? lines.find((l) => l.id === inspectIssuesTarget) ?? null
@@ -798,23 +1145,46 @@ export default function App() {
 
       <AdminAuthModal
         isOpen={adminAuthOpen}
+        centerCode={activeCenter.code}
         onClose={() => setAdminAuthOpen(false)}
         onAuthenticate={(reason) => {
           setLastAdminReason(reason);
           setIsAdminMode(true);
           if (adminAuthIntent === 'line') {
-            if (!quickReportLineId) {
-              setQuickReportLineId(lines[0]?.id || 'line-1');
+            if (!quickReportLineId && lines[0]?.id) {
+              setQuickReportLineId(lines[0].id);
             }
             pushToast(
               'Xác thực Admin thành công',
               'Đã mở khóa sửa thông tin Line, Line Leader phụ trách & định mức.',
               'blue'
             );
+          } else if (adminAuthIntent === 'center') {
+            setCenterManagerOpen(true);
+            pushToast(
+              'Xác thực Admin thành công',
+              'Đã mở khóa chức năng thêm / bớt Trung tâm sản xuất.',
+              'blue'
+            );
           } else {
             pushToast('Xác thực Admin thành công', 'Đã mở khóa chỉnh sửa Target Demand.', 'blue');
           }
         }}
+      />
+
+      <CenterManagementModal
+        isOpen={centerManagerOpen}
+        centers={centers}
+        activeCenterId={activeCenter.id}
+        isAdminMode={isAdminMode}
+        onRequestAdminAuth={() => {
+          setAdminAuthIntent('center');
+          setAdminAuthOpen(true);
+        }}
+        onSelectCenter={handleSelectCenter}
+        onAddCenter={handleAddCenter}
+        onDeleteCenter={handleDeleteCenter}
+        onClose={() => setCenterManagerOpen(false)}
       />
 
       <AuditHistoryModal
@@ -864,6 +1234,7 @@ export default function App() {
 
       <AddLineModal
         isOpen={addLineOpen}
+        centerCode={activeCenter.code}
         nextLineNumber={lines.length + 1}
         onClose={() => setAddLineOpen(false)}
         onCreateLine={(newLine) => {
@@ -908,7 +1279,7 @@ export default function App() {
           }
           pushToast(
             'Khởi tạo dây chuyền mới',
-            `Đã thêm ${newLine.name} (${newLine.stage}) vào hệ thống KHV.`
+            `Đã thêm ${newLine.name} (${newLine.stage}) vào Trung tâm ${activeCenter.code}.`
           );
         }}
       />

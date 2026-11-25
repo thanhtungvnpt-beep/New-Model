@@ -1,35 +1,59 @@
 import {
   AlertTriangle,
+  ArrowRight,
+  ArrowRightLeft,
+  Building2,
   CalendarClock,
   CheckCircle2,
   ClipboardEdit,
+  Cpu,
   Filter,
+  History,
   KeyRound,
   Lock,
   LockOpen,
   PackageCheck,
+  PlusCircle,
   Save,
   Settings2,
   ShieldAlert,
   Trash2,
+  Truck,
   UserCheck,
   X,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { addDaysToIso, formatLineTimestamp, getTodayIsoDate, isLineCompleted } from '../../data/initialData';
+import {
+  addDaysToIso,
+  createDefaultKeyMachines,
+  DEFAULT_FACTORIES,
+  formatLineTimestamp,
+  getDefaultLineCode,
+  getLineFactory,
+  getShortFactoryLabel,
+  getStatusHealthMeta,
+  getTodayIsoDate,
+  isLineCompleted,
+} from '../../data/initialData';
 import {
   isMassStopIssueStatus,
   IssueSeverity,
+  KeyMachineStatus,
   LineCharacteristic,
   LineHealthStatus,
+  LineKeyMachine,
+  LineTransferHistoryEntry,
   MASS_LINE_STATUSES,
   NEW_LINE_STATUSES,
+  ProductionCenter,
   ProductionLine,
 } from '../../types/production';
 import { SetupTimelineBar } from '../SetupTimelineBar';
 
 interface LineQuickReportModalProps {
   isOpen: boolean;
+  centers: ProductionCenter[];
+  activeCenter: ProductionCenter;
   lines: ProductionLine[];
   initialLineId: string | null;
   isAdminMode: boolean;
@@ -46,6 +70,17 @@ interface LineQuickReportModalProps {
     adminEdited?: boolean,
     syncLeaderToIssues?: boolean
   ) => void;
+  onTransferLineFactory: (
+    lineSnapshot: ProductionLine,
+    originalLineName: string,
+    destination: {
+      targetCenterId: string;
+      toFactory: string;
+      switchToTargetCenter?: boolean;
+    },
+    arrivalStatus: LineHealthStatus,
+    transferNote?: string
+  ) => LineTransferHistoryEntry;
   onDeleteLine: (lineId: string) => void;
   onFilterLineIssues: (lineName: string) => void;
   onInspectLineIssues: (lineId: string) => void;
@@ -53,6 +88,8 @@ interface LineQuickReportModalProps {
 
 export function LineQuickReportModal({
   isOpen,
+  centers,
+  activeCenter,
   lines,
   initialLineId,
   isAdminMode,
@@ -60,6 +97,7 @@ export function LineQuickReportModal({
   onExitAdminMode,
   onClose,
   onSaveLineReport,
+  onTransferLineFactory,
   onDeleteLine,
   onFilterLineIssues,
   onInspectLineIssues,
@@ -67,6 +105,7 @@ export function LineQuickReportModal({
   const [selectedId, setSelectedId] = useState<string>(initialLineId || lines[0]?.id || '');
 
   // Admin-editable Line info fields
+  const [lineCode, setLineCode] = useState('');
   const [lineName, setLineName] = useState('');
   const [stage, setStage] = useState('');
   const [shortStage, setShortStage] = useState('');
@@ -81,6 +120,16 @@ export function LineQuickReportModal({
   const [healthBadge, setHealthBadge] = useState('Ổn định');
   const [healthTone, setHealthTone] = useState<'emerald' | 'amber' | 'rose'>('emerald');
   const [note, setNote] = useState('');
+  const [transferTarget, setTransferTarget] = useState('');
+  const [factory, setFactory] = useState<string>(DEFAULT_FACTORIES[0]);
+  const [targetDestinationKey, setTargetDestinationKey] = useState<string>(DEFAULT_FACTORIES[1]);
+  const [targetCenterFactory, setTargetCenterFactory] = useState<string>(DEFAULT_FACTORIES[0]);
+  const [customFactoryInput, setCustomFactoryInput] = useState('');
+  const [switchToTargetCenter, setSwitchToTargetCenter] = useState(true);
+  const [arrivalStatus, setArrivalStatus] = useState<LineHealthStatus>('Đang sản xuất');
+  const [transferNote, setTransferNote] = useState('');
+  const [transferHistory, setTransferHistory] = useState<LineTransferHistoryEntry[]>([]);
+  const [transferSuccessMsg, setTransferSuccessMsg] = useState('');
 
   // Setup Timeline 3 milestones (when New line has not reached Mass Ready)
   const [setupCurrentDate, setSetupCurrentDate] = useState(getTodayIsoDate());
@@ -105,6 +154,13 @@ export function LineQuickReportModal({
   const [vtValidationError, setVtValidationError] = useState('');
   const [issueValidationError, setIssueValidationError] = useState('');
   const [syncLeaderToIssues, setSyncLeaderToIssues] = useState(true);
+  const [keyMachines, setKeyMachines] = useState<LineKeyMachine[]>([]);
+
+  const getLineSubnet = (target: Pick<ProductionLine, 'id' | 'name'>): number => {
+    const match = /(\d+)/.exec(target.name) || /(\d+)/.exec(target.id);
+    const parsed = match ? Number(match[1]) : 1;
+    return parsed >= 1 && parsed <= 254 ? parsed : 1;
+  };
 
   const loadLineIntoState = (target: ProductionLine) => {
     const today = getTodayIsoDate();
@@ -123,6 +179,7 @@ export function LineQuickReportModal({
         : 'Đang Lắp Ráp';
 
     setSelectedId(target.id);
+    setLineCode(getDefaultLineCode(target));
     setLineName(target.name);
     setStage(target.stage);
     setShortStage(target.shortStage);
@@ -135,6 +192,48 @@ export function LineQuickReportModal({
     setHealthBadge(target.healthBadge);
     setHealthTone(target.healthTone);
     setNote(target.lastNote || '');
+    setTransferTarget(target.transferTarget || '');
+    const curFac = getLineFactory(target);
+    setFactory(curFac);
+    const otherCenters = centers.filter((c) => c.id !== activeCenter.id);
+    const trimmedTarget = target.transferTarget?.trim() || '';
+    const matchedCenterByTarget = trimmedTarget
+      ? otherCenters.find(
+          (c) =>
+            trimmedTarget.toUpperCase().includes(c.code.toUpperCase()) ||
+            trimmedTarget.toLowerCase().includes(c.name.toLowerCase())
+        )
+      : undefined;
+
+    if (matchedCenterByTarget) {
+      setTargetDestinationKey(`__center__:${matchedCenterByTarget.id}`);
+      setTargetCenterFactory(DEFAULT_FACTORIES[0]);
+      setCustomFactoryInput('');
+    } else if (trimmedTarget) {
+      if ((DEFAULT_FACTORIES as readonly string[]).includes(trimmedTarget)) {
+        setTargetDestinationKey(trimmedTarget);
+        setCustomFactoryInput('');
+      } else {
+        setTargetDestinationKey('__custom__');
+        setCustomFactoryInput(trimmedTarget);
+      }
+      setTargetCenterFactory(DEFAULT_FACTORIES[0]);
+    } else if (otherCenters[0]) {
+      setTargetDestinationKey(`__center__:${otherCenters[0].id}`);
+      setTargetCenterFactory(DEFAULT_FACTORIES[0]);
+      setCustomFactoryInput('');
+    } else {
+      const fallbackFac =
+        DEFAULT_FACTORIES.find((f) => f !== curFac) || DEFAULT_FACTORIES[1];
+      setTargetDestinationKey(fallbackFac);
+      setTargetCenterFactory(DEFAULT_FACTORIES[0]);
+      setCustomFactoryInput('');
+    }
+    setSwitchToTargetCenter(true);
+    setArrivalStatus(char === 'mas' ? 'Đang sản xuất' : 'Đang Lắp Ráp');
+    setTransferNote('');
+    setTransferHistory(target.transferHistory ? [...target.transferHistory] : []);
+    setTransferSuccessMsg('');
     setSetupCurrentDate(target.setupTimeline?.currentDate || today);
     setSetupTargetDate(target.setupTimeline?.targetDate || addDaysToIso(today, 3));
     setSetupExpectedDate(target.setupTimeline?.expectedDate || addDaysToIso(today, 5));
@@ -150,6 +249,11 @@ export function LineQuickReportModal({
     setVtValidationError('');
     setIssueValidationError('');
     setSyncLeaderToIssues(true);
+    const initialMachines =
+      target.keyMachines && target.keyMachines.length > 0
+        ? target.keyMachines.map((m) => ({ ...m }))
+        : createDefaultKeyMachines(target.id, getLineSubnet(target));
+    setKeyMachines(initialMachines);
   };
 
   const getMassStopSeverity = (status: LineHealthStatus): IssueSeverity =>
@@ -292,6 +396,7 @@ export function LineQuickReportModal({
   if (!activeLine) return null;
 
   const hasStructuralChanges =
+    lineCode.trim() !== getDefaultLineCode(activeLine) ||
     lineName.trim() !== activeLine.name ||
     stage.trim() !== activeLine.stage ||
     shortStage.trim() !== activeLine.shortStage ||
@@ -376,9 +481,11 @@ export function LineQuickReportModal({
 
     const updatedLine: ProductionLine = {
       ...activeLine,
+      lineCode: isAdminMode && lineCode.trim() ? lineCode.trim() : getDefaultLineCode(activeLine),
       name: isAdminMode && lineName.trim() ? lineName.trim() : activeLine.name,
       stage: isAdminMode && stage.trim() ? stage.trim() : activeLine.stage,
       shortStage: isAdminMode && shortStage.trim() ? shortStage.trim() : activeLine.shortStage,
+      factory,
       leader: isAdminMode && leader.trim() ? leader.trim() : activeLine.leader,
       characteristic: safeCharacteristic,
       vtPercent,
@@ -388,7 +495,21 @@ export function LineQuickReportModal({
       healthBadge,
       healthTone,
       lastNote: note.trim() || undefined,
+      transferTarget:
+        (statusLabel === 'Đang tháo chuyển' || statusLabel === 'Đã chuyển') &&
+        transferTarget.trim()
+          ? transferTarget.trim()
+          : undefined,
+      transferHistory,
       updatedAt: formatLineTimestamp(),
+      keyMachines: keyMachines
+        .map((m) => ({
+          ...m,
+          name: m.name.trim(),
+          ip: m.ip.trim() || `192.168.${getLineSubnet(activeLine)}.10`,
+          note: m.note?.trim() || undefined,
+        }))
+        .filter((m) => m.name.length > 0),
       setupTimeline: {
         currentDate: setupCurrentDate || getTodayIsoDate(),
         targetDate: setupTargetDate || addDaysToIso(getTodayIsoDate(), 3),
@@ -441,6 +562,12 @@ export function LineQuickReportModal({
                   }`}
                 >
                   {characteristic === 'new' ? 'New · Test model mới' : 'Mass · SX hàng loạt'}
+                </span>
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-white/20 text-white border border-white/25 inline-flex items-center gap-1">
+                  <Building2 className="w-3 h-3" />
+                  <span>
+                    {activeCenter.code} · {getShortFactoryLabel(factory)}
+                  </span>
                 </span>
                 {isAdminMode && (
                   <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-400 text-slate-900">
@@ -512,12 +639,16 @@ export function LineQuickReportModal({
                 ? 'bg-amber-50/80 border-amber-300 text-amber-700'
                 : 'bg-rose-50/80 border-rose-300 text-rose-700';
             const statusCardClass =
-              statusLabel === 'Dừng do Máy hỏng' ||
-              statusLabel === 'Dừng do Lỗi thao tác' ||
-              statusLabel === 'Dừng Chất lượng' ||
-              statusLabel === 'Dừng do Sự cố điện' ||
-              statusLabel === 'Tạm Hoãn' ||
-              healthTone === 'rose'
+              statusLabel === 'Đang tháo chuyển'
+                ? 'bg-sky-50/80 border-2 border-dashed border-sky-400'
+                : statusLabel === 'Đã chuyển'
+                ? 'bg-slate-100 border-slate-300'
+                : statusLabel === 'Dừng do Máy hỏng' ||
+                  statusLabel === 'Dừng do Lỗi thao tác' ||
+                  statusLabel === 'Dừng Chất lượng' ||
+                  statusLabel === 'Dừng do Sự cố điện' ||
+                  statusLabel === 'Tạm Hoãn' ||
+                  healthTone === 'rose'
                 ? 'bg-rose-50/80 border-rose-300'
                 : healthTone === 'amber' ||
                   statusLabel === 'Dừng do Vật liệu' ||
@@ -585,32 +716,38 @@ export function LineQuickReportModal({
                       {statusLabel} · {healthBadge}
                     </span>
                   </div>
-                  <CheckCircle2
-                    className={`w-5 h-5 ${
-                      statusLabel === 'Dừng do Máy hỏng' ||
-                      statusLabel === 'Dừng do Lỗi thao tác' ||
-                      statusLabel === 'Dừng Chất lượng' ||
-                      statusLabel === 'Dừng do Sự cố điện' ||
-                      statusLabel === 'Tạm Hoãn' ||
-                      healthTone === 'rose'
-                        ? 'text-rose-600'
-                        : healthTone === 'amber' ||
-                          statusLabel === 'Dừng do Vật liệu' ||
-                          statusLabel === 'Dừng do Thiếu người' ||
-                          statusLabel === 'Dừng Bảo dưỡng' ||
-                          statusLabel === 'Dừng Vệ Sinh' ||
-                          statusLabel === 'Dừng do Lỗi khác' ||
-                          statusLabel === 'Dừng do Hết Plan' ||
-                          statusLabel === 'Chờ Vật Tư' ||
-                          statusLabel === 'Đang Lắp Ráp' ||
-                          statusLabel === 'Đang cài đặt' ||
-                          statusLabel === 'Test Lại'
-                        ? 'text-amber-600'
-                        : statusLabel === 'Chạy thử'
-                        ? 'text-cyan-600'
-                        : 'text-emerald-600'
-                    }`}
-                  />
+                  {statusLabel === 'Đang tháo chuyển' ? (
+                    <Truck className="w-5 h-5 text-sky-600" />
+                  ) : statusLabel === 'Đã chuyển' ? (
+                    <ArrowRightLeft className="w-5 h-5 text-slate-600" />
+                  ) : (
+                    <CheckCircle2
+                      className={`w-5 h-5 ${
+                        statusLabel === 'Dừng do Máy hỏng' ||
+                        statusLabel === 'Dừng do Lỗi thao tác' ||
+                        statusLabel === 'Dừng Chất lượng' ||
+                        statusLabel === 'Dừng do Sự cố điện' ||
+                        statusLabel === 'Tạm Hoãn' ||
+                        healthTone === 'rose'
+                          ? 'text-rose-600'
+                          : healthTone === 'amber' ||
+                            statusLabel === 'Dừng do Vật liệu' ||
+                            statusLabel === 'Dừng do Thiếu người' ||
+                            statusLabel === 'Dừng Bảo dưỡng' ||
+                            statusLabel === 'Dừng Vệ Sinh' ||
+                            statusLabel === 'Dừng do Lỗi khác' ||
+                            statusLabel === 'Dừng do Hết Plan' ||
+                            statusLabel === 'Chờ Vật Tư' ||
+                            statusLabel === 'Đang Lắp Ráp' ||
+                            statusLabel === 'Đang cài đặt' ||
+                            statusLabel === 'Test Lại'
+                          ? 'text-amber-600'
+                          : statusLabel === 'Chạy thử'
+                          ? 'text-cyan-600'
+                          : 'text-emerald-600'
+                      }`}
+                    />
+                  )}
                 </div>
               </div>
             );
@@ -868,6 +1005,26 @@ export function LineQuickReportModal({
 
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">
+                  Mã số Line *
+                </label>
+                <input
+                  required
+                  type="text"
+                  maxLength={16}
+                  disabled={!isAdminMode}
+                  value={lineCode}
+                  onChange={(e) => setLineCode(e.target.value)}
+                  placeholder="VD: LN-01"
+                  className={`w-full rounded-lg border px-3 py-1.5 font-mono font-bold tabular-nums ${
+                    isAdminMode
+                      ? 'border-blue-300 bg-white text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none'
+                      : 'border-slate-200 bg-slate-100 text-slate-500 cursor-not-allowed'
+                  }`}
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
                   Nhãn ngắn trên Node *
                 </label>
                 <input
@@ -886,9 +1043,9 @@ export function LineQuickReportModal({
                 />
               </div>
 
-              <div className="sm:col-span-2">
+              <div>
                 <label className="block font-semibold text-slate-700 mb-1">
-                  Tên công đoạn / Quy trình đầy đủ *
+                  Tên công đoạn / Quy trình *
                 </label>
                 <input
                   required
@@ -1035,6 +1192,228 @@ export function LineQuickReportModal({
               )}
             </div>
           </div>
+
+          {/* Key Machines Square Block Diagram Only (Admin edits Name & IP inline) */}
+          {(() => {
+            const faultCount = keyMachines.filter((m) => m.status === 'Dừng lỗi').length;
+            const warnCount = keyMachines.filter(
+              (m) => m.status === 'Cần theo dõi' || m.status === 'Đang bảo trì'
+            ).length;
+            const subnet = getLineSubnet(activeLine);
+
+            const handleAddMachine = () => {
+              const nextLetterCode = 65 + keyMachines.length;
+              const defaultName =
+                nextLetterCode <= 90
+                  ? `Máy ${String.fromCharCode(nextLetterCode)}`
+                  : `Máy ${keyMachines.length + 1}`;
+              const newId = `${activeLine.id}-m-${Date.now()}-${keyMachines.length}`;
+              const nextHost = 11 + keyMachines.length;
+              setKeyMachines((prev) => [
+                ...prev,
+                {
+                  id: newId,
+                  name: defaultName,
+                  ip: `192.168.${subnet}.${nextHost <= 254 ? nextHost : 200}`,
+                  status: 'Hoạt động tốt',
+                },
+              ]);
+            };
+
+            const handleUpdateMachine = (
+              id: string,
+              patch: Partial<LineKeyMachine>
+            ) => {
+              setKeyMachines((prev) =>
+                prev.map((m) => (m.id === id ? { ...m, ...patch } : m))
+              );
+            };
+
+            const handleRemoveMachine = (id: string) => {
+              setKeyMachines((prev) => prev.filter((m) => m.id !== id));
+            };
+
+            return (
+              <div className="rounded-xl border border-indigo-200 bg-indigo-50/35 p-4 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-indigo-200/70">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Cpu className="w-4 h-4 text-indigo-600 shrink-0" />
+                    <span className="font-bold text-slate-900">
+                      Sơ Đồ Khối Máy Chủ Chốt ({keyMachines.length} máy)
+                    </span>
+                    {faultCount > 0 && (
+                      <span className="px-2 py-0.5 rounded bg-rose-100 text-rose-700 text-[10px] font-bold">
+                        {faultCount} Dừng lỗi
+                      </span>
+                    )}
+                    {warnCount > 0 && (
+                      <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold">
+                        {warnCount} Cần theo dõi / Bảo trì
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {isAdminMode ? (
+                      <>
+                        <span className="inline-flex items-center gap-1 text-[10.5px] font-bold text-emerald-700">
+                          <LockOpen className="w-3.5 h-3.5" />
+                          <span>Admin: Sửa Tên &amp; IP trực tiếp trên ô vuông</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleAddMachine}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-xs transition cursor-pointer"
+                        >
+                          <PlusCircle className="w-3.5 h-3.5" />
+                          <span>Thêm máy</span>
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={onRequestAdminAuth}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white hover:bg-blue-50 text-blue-700 border border-blue-300 font-bold transition cursor-pointer"
+                      >
+                        <Lock className="w-3 h-3" />
+                        <span>Mở khóa Admin để sửa Tên &amp; IP máy</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {keyMachines.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-indigo-300 bg-white/80 py-4 px-3 text-center text-slate-500">
+                    Chưa có máy chủ chốt nào trên {lineName || activeLine.name}.{' '}
+                    {isAdminMode
+                      ? 'Bấm "Thêm máy" để khai báo (VD: Máy A, Máy B, Máy C).'
+                      : 'Mở khóa Admin để thêm máy mới.'}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-indigo-200/80 bg-white p-4 overflow-x-auto">
+                    <div className="flex items-center flex-wrap gap-y-3">
+                      {keyMachines.map((machine, idx) => {
+                        const blockTheme =
+                          machine.status === 'Dừng lỗi'
+                            ? {
+                                box: 'border-rose-500 bg-rose-50/70 shadow-[0_0_12px_rgba(244,63,94,0.22)]',
+                                dot: 'bg-rose-500',
+                                select: 'border-rose-300 bg-white text-rose-700',
+                                badge: 'bg-rose-600 text-white',
+                              }
+                            : machine.status === 'Cần theo dõi' ||
+                              machine.status === 'Đang bảo trì'
+                            ? {
+                                box: 'border-amber-400 bg-amber-50/70 shadow-[0_0_12px_rgba(245,158,11,0.2)]',
+                                dot: 'bg-amber-500',
+                                select: 'border-amber-300 bg-white text-amber-800',
+                                badge: 'bg-amber-500 text-white',
+                              }
+                            : {
+                                box: 'border-emerald-400 bg-emerald-50/50 shadow-[0_0_12px_rgba(16,185,129,0.18)]',
+                                dot: 'bg-emerald-500',
+                                select: 'border-emerald-300 bg-white text-emerald-700',
+                                badge: 'bg-indigo-600 text-white',
+                              };
+
+                        return (
+                          <div key={machine.id} className="flex items-center">
+                            <div
+                              title={`${machine.name || 'Máy'} · IP: ${machine.ip || '--'} (${machine.status})`}
+                              className={`w-[138px] h-[138px] rounded-xl border-2 p-2 flex flex-col justify-between shrink-0 transition-all ${blockTheme.box}`}
+                            >
+                              <div className="flex items-center justify-between gap-1">
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold tabular-nums ${blockTheme.badge}`}
+                                >
+                                  #{idx + 1}
+                                </span>
+                                <div className="flex items-center gap-1">
+                                  <span className={`w-2 h-2 rounded-full ${blockTheme.dot}`} />
+                                  {isAdminMode && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveMachine(machine.id)}
+                                      title={`Xóa ${machine.name || 'máy này'}`}
+                                      className="w-4 h-4 rounded bg-white/90 hover:bg-rose-600 text-slate-400 hover:text-white border border-slate-200 flex items-center justify-center transition cursor-pointer"
+                                    >
+                                      <X className="w-2.5 h-2.5" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="space-y-1 my-auto">
+                                {isAdminMode ? (
+                                  <>
+                                    <input
+                                      type="text"
+                                      aria-label={`Tên máy ${idx + 1}`}
+                                      value={machine.name}
+                                      onChange={(e) =>
+                                        handleUpdateMachine(machine.id, { name: e.target.value })
+                                      }
+                                      placeholder="Tên máy"
+                                      className="w-full rounded border border-indigo-300 bg-white px-1.5 py-0.5 text-[11px] font-extrabold text-slate-900 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                                    />
+                                    <input
+                                      type="text"
+                                      aria-label={`IP máy ${machine.name || idx + 1}`}
+                                      value={machine.ip}
+                                      onChange={(e) =>
+                                        handleUpdateMachine(machine.id, { ip: e.target.value })
+                                      }
+                                      placeholder={`192.168.${subnet}.11`}
+                                      className="w-full rounded border border-indigo-300 bg-white px-1.5 py-0.5 font-mono text-[10px] font-bold text-indigo-700 focus:ring-1 focus:ring-indigo-500 focus:outline-none tabular-nums"
+                                    />
+                                  </>
+                                ) : (
+                                  <>
+                                    <div className="text-xs font-extrabold text-slate-900 truncate leading-tight px-0.5">
+                                      {machine.name || `Máy ${idx + 1}`}
+                                    </div>
+                                    <div className="px-1.5 py-1 rounded-md bg-white border border-slate-200 font-mono text-[10px] font-bold text-indigo-700 truncate tabular-nums">
+                                      {machine.ip || 'Chưa có IP'}
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+
+                              <select
+                                aria-label={`Trạng thái ${machine.name || idx + 1}`}
+                                value={machine.status}
+                                onChange={(e) =>
+                                  handleUpdateMachine(machine.id, {
+                                    status: e.target.value as KeyMachineStatus,
+                                  })
+                                }
+                                className={`w-full rounded border px-1 py-0.5 text-[9.5px] font-bold focus:outline-none cursor-pointer ${blockTheme.select}`}
+                              >
+                                <option value="Hoạt động tốt">Hoạt động tốt</option>
+                                <option value="Cần theo dõi">Cần theo dõi</option>
+                                <option value="Đang bảo trì">Đang bảo trì</option>
+                                <option value="Dừng lỗi">Dừng lỗi</option>
+                              </select>
+                            </div>
+
+                            {idx < keyMachines.length - 1 && (
+                              <div
+                                aria-hidden="true"
+                                className="flex items-center px-1.5 shrink-0 text-indigo-400"
+                              >
+                                <div className="w-4 sm:w-6 border-t-2 border-dashed border-indigo-400" />
+                                <ArrowRight className="w-3.5 h-3.5 -ml-1 text-indigo-500 shrink-0" />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* 1. Material Progress & Line Health */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1196,6 +1575,12 @@ export function LineQuickReportModal({
                 } else if (nextStatus === 'Chạy thử') {
                   setHealthTone('emerald');
                   setHealthBadge('Sắp hoàn thành');
+                } else if (nextStatus === 'Đang tháo chuyển') {
+                  setHealthTone('amber');
+                  setHealthBadge('Đang di dời NM');
+                } else if (nextStatus === 'Đã chuyển') {
+                  setHealthTone('emerald');
+                  setHealthBadge('Đã chuyển NM');
                 }
               }}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 bg-white font-semibold text-slate-800"
@@ -1206,10 +1591,61 @@ export function LineQuickReportModal({
                 </option>
               ))}
             </select>
+            {(statusLabel === 'Đang tháo chuyển' || statusLabel === 'Đã chuyển') && (
+              <div
+                className={`mt-2.5 rounded-xl p-3 space-y-2 ${
+                  statusLabel === 'Đang tháo chuyển'
+                    ? 'border-2 border-dashed border-sky-400 bg-sky-50/70'
+                    : 'border border-slate-300 bg-slate-100/80'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span
+                    className={`inline-flex items-center gap-1.5 font-bold text-[11px] ${
+                      statusLabel === 'Đang tháo chuyển' ? 'text-sky-800' : 'text-slate-700'
+                    }`}
+                  >
+                    {statusLabel === 'Đang tháo chuyển' ? (
+                      <Truck className="w-3.5 h-3.5 text-sky-600" />
+                    ) : (
+                      <ArrowRightLeft className="w-3.5 h-3.5 text-slate-600" />
+                    )}
+                    <span>
+                      {statusLabel === 'Đang tháo chuyển'
+                        ? 'Thẻ Line sẽ chuyển sang viền nét đứt trong thời gian tháo chuyển'
+                        : 'Line đã hoàn tất chuyển sang nhà máy đích'}
+                    </span>
+                  </span>
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1 text-[11px]">
+                    Nhà máy / Trung tâm chuyển đến (tùy chọn)
+                  </label>
+                  <input
+                    type="text"
+                    list="line-transfer-target-suggestions"
+                    value={transferTarget}
+                    onChange={(e) => setTransferTarget(e.target.value)}
+                    placeholder="VD: Trung tâm DAALL / Nhà máy 2 (NM2)..."
+                    className="w-full rounded-lg border border-slate-300 px-3 py-1.5 bg-white text-slate-800 font-medium"
+                  />
+                  <datalist id="line-transfer-target-suggestions">
+                    {centers
+                      .filter((c) => c.id !== activeCenter.id)
+                      .map((c) => (
+                        <option key={c.id} value={`Trung tâm ${c.code}`} />
+                      ))}
+                    {DEFAULT_FACTORIES.map((fac) => (
+                      <option key={fac} value={fac} />
+                    ))}
+                  </datalist>
+                </div>
+              </div>
+            )}
             {characteristic === 'mas' && (
               <div className="mt-1.5 space-y-1">
                 <p className="text-[10px] text-sky-700 font-medium">
-                  Line Mass: mọi trạng thái dừng máy (trừ Dừng hoàn thành Plan) tự động tính +1 Issue.
+                  Line Mass: mọi trạng thái dừng máy (trừ Dừng hoàn thành Plan, Đang tháo chuyển, Đã chuyển) tự động tính +1 Issue.
                 </p>
                 {autoStopIssueApplied && isMassStopIssueStatus(statusLabel) && (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-rose-100 border border-rose-200 text-rose-800 text-[10px] font-bold">
@@ -1223,7 +1659,49 @@ export function LineQuickReportModal({
 
           {/* 2b. Timeline Section for All Lines */}
           {(() => {
-            const isMassLine = characteristic === 'mas';
+            if (statusLabel === 'Đang tháo chuyển') {
+              return (
+                <div className="rounded-xl border-2 border-dashed border-sky-400 bg-sky-50/70 p-4 space-y-2">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-sky-600 text-white font-bold text-xs">
+                      <Truck className="w-3.5 h-3.5" />
+                      <span>
+                        {lineName || activeLine.name} · Đang tháo chuyển nhà máy
+                      </span>
+                    </span>
+                    <span className="text-[11px] font-semibold text-sky-800">
+                      {transferTarget.trim()
+                        ? `Đích đến: ${transferTarget.trim()}`
+                        : 'Thẻ Line trên sơ đồ hiển thị viền nét đứt'}
+                    </span>
+                  </div>
+                  <div className="border-t-2 border-dashed border-sky-400 pt-1" />
+                </div>
+              );
+            }
+
+            if (statusLabel === 'Đã chuyển') {
+              return (
+                <div className="rounded-xl border border-slate-300 bg-slate-100 p-4 space-y-2">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-600 text-white font-bold text-xs">
+                      <ArrowRightLeft className="w-3.5 h-3.5" />
+                      <span>
+                        {lineName || activeLine.name} · Đã chuyển nhà máy
+                      </span>
+                    </span>
+                    <span className="text-[11px] font-semibold text-slate-600">
+                      {transferTarget.trim()
+                        ? `Đã chuyển tới: ${transferTarget.trim()}`
+                        : 'Đã hoàn tất bàn giao sang nhà máy khác'}
+                    </span>
+                  </div>
+                <div className="h-2 rounded-full bg-slate-300" />
+              </div>
+            );
+          }
+
+          const isMassLine = characteristic === 'mas';
             const isSetupDone = isMassLine || statusLabel === 'Mass Ready';
             const completed =
               isSetupDone ||
@@ -1283,6 +1761,364 @@ export function LineQuickReportModal({
                     setSetupExpectedDate(next.expectedDate);
                   }}
                 />
+              </div>
+            );
+          })()}
+
+          {/* 2c. Admin Factory & Center Transfer & History (Preserve all parameters & history) */}
+          {(() => {
+            const otherCenters = centers.filter((c) => c.id !== activeCenter.id);
+            const isCrossCenter = targetDestinationKey.startsWith('__center__:');
+            const selectedDestCenter = isCrossCenter
+              ? otherCenters.find((c) => `__center__:${c.id}` === targetDestinationKey) || null
+              : null;
+
+            const allFactoryChoices = Array.from(
+              new Set([
+                ...DEFAULT_FACTORIES,
+                ...lines.map((l) => getLineFactory(l)),
+                factory,
+              ])
+            );
+
+            const destCenterFactories = selectedDestCenter
+              ? Array.from(
+                  new Set([
+                    ...DEFAULT_FACTORIES,
+                    ...selectedDestCenter.lines.map((l) => getLineFactory(l)),
+                  ])
+                )
+              : [...DEFAULT_FACTORIES];
+
+            const resolvedSameCenterFactory =
+              targetDestinationKey === '__custom__'
+                ? customFactoryInput.trim()
+                : targetDestinationKey;
+
+            const resolvedToFactory = isCrossCenter
+              ? targetCenterFactory
+              : resolvedSameCenterFactory;
+
+            const canExecuteTransfer =
+              isAdminMode &&
+              (isCrossCenter
+                ? Boolean(selectedDestCenter && resolvedToFactory)
+                : Boolean(resolvedSameCenterFactory) && resolvedSameCenterFactory !== factory);
+
+            const arrivalChoices: LineHealthStatus[] = (
+              characteristic === 'mas' ? MASS_LINE_STATUSES : NEW_LINE_STATUSES
+            ).filter((s) => s !== 'Đang tháo chuyển');
+            const resolvedArrivalStatus: LineHealthStatus = arrivalChoices.includes(arrivalStatus)
+              ? arrivalStatus
+              : characteristic === 'mas'
+              ? 'Đang sản xuất'
+              : 'Đang Lắp Ráp';
+
+            const handleExecuteTransfer = () => {
+              if (!canExecuteTransfer) return;
+              const safeChar: LineCharacteristic =
+                activeLine.characteristic === 'mas' && !isAdminMode ? 'mas' : characteristic;
+              const snapshot: ProductionLine = {
+                ...activeLine,
+                lineCode:
+                  isAdminMode && lineCode.trim()
+                    ? lineCode.trim()
+                    : getDefaultLineCode(activeLine),
+                name: isAdminMode && lineName.trim() ? lineName.trim() : activeLine.name,
+                stage: isAdminMode && stage.trim() ? stage.trim() : activeLine.stage,
+                shortStage:
+                  isAdminMode && shortStage.trim()
+                    ? shortStage.trim()
+                    : activeLine.shortStage,
+                factory,
+                leader: isAdminMode && leader.trim() ? leader.trim() : activeLine.leader,
+                characteristic: safeChar,
+                vtPercent,
+                healthPercent,
+                issueCount,
+                statusLabel,
+                healthBadge,
+                healthTone,
+                lastNote: note.trim() || undefined,
+                transferHistory,
+                keyMachines: keyMachines
+                  .map((m) => ({
+                    ...m,
+                    name: m.name.trim(),
+                    ip: m.ip.trim() || `192.168.${getLineSubnet(activeLine)}.10`,
+                    note: m.note?.trim() || undefined,
+                  }))
+                  .filter((m) => m.name.length > 0),
+                setupTimeline: {
+                  currentDate: setupCurrentDate || getTodayIsoDate(),
+                  targetDate: setupTargetDate || addDaysToIso(getTodayIsoDate(), 3),
+                  expectedDate: setupExpectedDate || addDaysToIso(getTodayIsoDate(), 5),
+                },
+              };
+
+              const newEntry = onTransferLineFactory(
+                snapshot,
+                activeLine.name,
+                {
+                  targetCenterId: selectedDestCenter ? selectedDestCenter.id : activeCenter.id,
+                  toFactory: resolvedToFactory,
+                  switchToTargetCenter: Boolean(selectedDestCenter && switchToTargetCenter),
+                },
+                resolvedArrivalStatus,
+                transferNote.trim() || undefined
+              );
+
+              if (selectedDestCenter) {
+                onClose();
+                return;
+              }
+
+              const meta = getStatusHealthMeta(resolvedArrivalStatus, issueCount);
+              setFactory(resolvedToFactory);
+              setStatusLabel(resolvedArrivalStatus);
+              setHealthBadge(meta.healthBadge);
+              setHealthTone(meta.healthTone);
+              setTransferTarget('');
+              setTransferNote('');
+              setTransferHistory((prev) => [newEntry, ...prev]);
+              setTransferSuccessMsg(
+                `Đã chuyển ${snapshot.name} từ ${newEntry.fromFactory} sang ${resolvedToFactory} — giữ nguyên toàn bộ thông số (${vtPercent}% VT, ${issueCount} Issue, ${snapshot.keyMachines?.length ?? 0} máy) & lịch sử.`
+              );
+              const nextFallback =
+                allFactoryChoices.find((f) => f !== resolvedToFactory) || '__custom__';
+              setTargetDestinationKey(nextFallback);
+            };
+
+            return (
+              <div
+                className={`rounded-xl border-2 p-4 space-y-3 ${
+                  statusLabel === 'Đã chuyển'
+                    ? 'border-blue-400 bg-blue-50/70'
+                    : 'border-slate-200 bg-slate-50/80'
+                }`}
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-200">
+                  <div className="flex items-center gap-2">
+                    <Building2 className="w-4 h-4 text-blue-700 shrink-0" />
+                    <div>
+                      <span className="font-bold text-slate-900 block">
+                        Điều Chuyển Nhà Máy / Trung Tâm Cho Line (Quyền Admin)
+                      </span>
+                      <span className="text-[11px] text-slate-600">
+                        Vị trí hiện tại:{' '}
+                        <strong className="text-blue-800">
+                          Trung tâm {activeCenter.code} · {factory}
+                        </strong>{' '}
+                        · Giữ nguyên mọi thông số, máy chủ chốt &amp; lịch sử
+                      </span>
+                    </div>
+                  </div>
+                  {!isAdminMode && (
+                    <button
+                      type="button"
+                      onClick={onRequestAdminAuth}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-xs cursor-pointer shrink-0"
+                    >
+                      <Lock className="w-3.5 h-3.5" />
+                      <span>Mở khóa Admin để chuyển</span>
+                    </button>
+                  )}
+                </div>
+
+                {statusLabel === 'Đã chuyển' && !isAdminMode && (
+                  <div className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-[11px] text-blue-900 font-medium">
+                    Line đã chuyển xong. Admin mở khóa để điều chuyển{' '}
+                    <strong>{lineName || activeLine.name}</strong> sang nhà máy hoặc trung tâm đích mới (như{' '}
+                    <strong>DAALL</strong> / <strong>KHV</strong>) và bảo toàn toàn bộ thông số, máy móc &amp; lịch sử.
+                  </div>
+                )}
+
+                {isAdminMode && (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">
+                          Chuyển đến Trung tâm / Nhà máy mới *
+                        </label>
+                        <select
+                          value={targetDestinationKey}
+                          onChange={(e) => setTargetDestinationKey(e.target.value)}
+                          className="w-full rounded-lg border border-blue-300 bg-white px-3 py-2 font-semibold text-slate-800"
+                        >
+                          {otherCenters.length > 0 && (
+                            <optgroup label="Chuyển sang Trung tâm khác (giữ nguyên toàn bộ Line & Issue)">
+                              {otherCenters.map((c) => (
+                                <option key={c.id} value={`__center__:${c.id}`}>
+                                  Trung tâm {c.code} — {c.name} ({c.lines.length} Line)
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                          <optgroup label={`Chuyển Nhà máy nội bộ tại Trung tâm ${activeCenter.code}`}>
+                            {allFactoryChoices.map((fac) => (
+                              <option key={fac} value={fac} disabled={fac === factory}>
+                                {fac}
+                                {fac === factory ? ' (Hiện tại)' : ''}
+                              </option>
+                            ))}
+                            <option value="__custom__">+ Nhập tên nhà máy khác...</option>
+                          </optgroup>
+                        </select>
+
+                        {isCrossCenter && selectedDestCenter && (
+                          <div className="mt-2">
+                            <label className="block font-semibold text-slate-700 mb-1 text-[11px]">
+                              Nhà máy tiếp nhận tại Trung tâm {selectedDestCenter.code}
+                            </label>
+                            <select
+                              value={targetCenterFactory}
+                              onChange={(e) => setTargetCenterFactory(e.target.value)}
+                              className="w-full rounded-lg border border-indigo-300 bg-white px-3 py-1.5 font-semibold text-slate-800"
+                            >
+                              {destCenterFactories.map((fac) => (
+                                <option key={fac} value={fac}>
+                                  {fac}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        {!isCrossCenter && targetDestinationKey === '__custom__' && (
+                          <input
+                            type="text"
+                            value={customFactoryInput}
+                            onChange={(e) => setCustomFactoryInput(e.target.value)}
+                            placeholder="VD: Nhà máy 4 - Hải Phòng (NM4)"
+                            className="mt-2 w-full rounded-lg border border-blue-300 bg-white px-3 py-1.5 font-medium text-slate-800"
+                          />
+                        )}
+                      </div>
+
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">
+                          Trạng thái sau khi nhận tại nơi mới
+                        </label>
+                        <select
+                          value={resolvedArrivalStatus}
+                          onChange={(e) =>
+                            setArrivalStatus(e.target.value as LineHealthStatus)
+                          }
+                          className="w-full rounded-lg border border-blue-300 bg-white px-3 py-2 font-semibold text-slate-800"
+                        >
+                          {arrivalChoices.map((st) => (
+                            <option key={st} value={st}>
+                              {st}
+                            </option>
+                          ))}
+                        </select>
+
+                        {isCrossCenter && selectedDestCenter && (
+                          <label className="mt-2.5 inline-flex items-center gap-2 text-[11px] font-semibold text-indigo-800 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={switchToTargetCenter}
+                              onChange={(e) => setSwitchToTargetCenter(e.target.checked)}
+                              className="w-3.5 h-3.5 accent-indigo-600 cursor-pointer"
+                            />
+                            <span>
+                              Mở ngay Trung tâm {selectedDestCenter.code} sau khi chuyển Line
+                            </span>
+                          </label>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block font-semibold text-slate-700 mb-1">
+                        Ghi chú biên bản bàn giao chuyển nhà máy / trung tâm (tùy chọn)
+                      </label>
+                      <input
+                        type="text"
+                        value={transferNote}
+                        onChange={(e) => setTransferNote(e.target.value)}
+                        placeholder="VD: Điều chuyển sang DAALL để mở rộng công suất, giữ nguyên Máy A-C & lịch sử..."
+                        className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-slate-800"
+                      />
+                    </div>
+
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50/80 px-3 py-2 text-[11px] text-emerald-900">
+                      <strong className="block">Bảo toàn 100% thông số &amp; lịch sử của Line:</strong>
+                      <span>
+                        Mã Line ({lineCode}) · % VT ({vtPercent}%) · Health ({healthPercent}%) · {issueCount} Issue &amp; toàn bộ hồ sơ sự cố · Leader ({leader}) · {keyMachines.length} máy chủ chốt &amp; IP.
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="text-[11px] text-slate-500">
+                        {isCrossCenter && selectedDestCenter
+                          ? `Sẵn sàng chuyển: Trung tâm ${activeCenter.code} (${factory}) → Trung tâm ${selectedDestCenter.code} (${resolvedToFactory})`
+                          : resolvedSameCenterFactory === factory
+                          ? 'Vui lòng chọn nhà máy đích khác với nhà máy hiện tại.'
+                          : resolvedSameCenterFactory
+                          ? `Sẵn sàng chuyển nội bộ ${activeCenter.code}: ${factory} → ${resolvedSameCenterFactory}`
+                          : 'Vui lòng nhập tên nhà máy đích.'}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={!canExecuteTransfer}
+                        onClick={handleExecuteTransfer}
+                        className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg font-bold transition ${
+                          canExecuteTransfer
+                            ? 'bg-blue-700 hover:bg-blue-800 text-white shadow-sm cursor-pointer'
+                            : 'bg-slate-200 text-slate-500 border border-slate-300 cursor-not-allowed'
+                        }`}
+                      >
+                        <ArrowRightLeft className="w-3.5 h-3.5" />
+                        <span>
+                          {selectedDestCenter
+                            ? `Chuyển sang Trung tâm ${selectedDestCenter.code} (Admin)`
+                            : 'Xác nhận chuyển nhà máy (Admin)'}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {transferSuccessMsg && (
+                  <div className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-[11px] font-bold text-emerald-800">
+                    {transferSuccessMsg}
+                  </div>
+                )}
+
+                {transferHistory.length > 0 && (
+                  <div className="pt-2 border-t border-slate-200 space-y-2">
+                    <div className="flex items-center gap-1.5 font-bold text-slate-800 text-[11px]">
+                      <History className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Lịch Sử Chuyển Nhà Máy Của Line ({transferHistory.length} lần)</span>
+                    </div>
+                    <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                      {transferHistory.map((entry) => (
+                        <div
+                          key={entry.id}
+                          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px] space-y-0.5"
+                        >
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <span className="font-bold text-slate-900">
+                              {entry.fromFactory} → {entry.toFactory}
+                            </span>
+                            <span className="text-[10px] text-slate-500 tabular-nums">
+                              {entry.timestamp} · {entry.performedBy}
+                            </span>
+                          </div>
+                          <div className="text-[10.5px] text-slate-600">
+                            Bảo toàn: {entry.preservedSnapshot.lineCode} · VT {entry.preservedSnapshot.vtPercent}% · Health {entry.preservedSnapshot.healthPercent}% · {entry.preservedSnapshot.issueCount} Issue · {entry.preservedSnapshot.machinesCount} máy · Leader: {entry.preservedSnapshot.leader}
+                          </div>
+                          {entry.note && (
+                            <div className="text-[10.5px] text-blue-800 font-medium">
+                              Ghi chú: {entry.note}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })()}
@@ -1416,7 +2252,7 @@ export function LineQuickReportModal({
                 </p>
               ) : (
                 <p className="text-[11px] text-slate-600">
-                  Với Line chạy <strong>Mass</strong>, mục này sẽ tự động sinh ra khi khai báo các trạng thái dừng ở mục trên (trừ <strong>Dừng hoàn thành Plan</strong>).
+                  Với Line chạy <strong>Mass</strong>, mục này sẽ tự động sinh ra khi khai báo các trạng thái dừng ở mục trên (trừ <strong>Dừng hoàn thành Plan</strong>, <strong>Đang tháo chuyển</strong>, <strong>Đã chuyển</strong>).
                 </p>
               )}
             </div>

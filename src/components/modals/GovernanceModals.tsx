@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   Download,
   History,
+  Layers,
   Lock,
   LockOpen,
   Mail,
@@ -13,12 +14,19 @@ import {
   Send,
   Shield,
   Table,
+  Trash2,
   X,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { formatLineTimestamp } from '../../data/initialData';
+import {
+  createDefaultKeyMachines,
+  DEFAULT_FACTORIES,
+  formatLineTimestamp,
+  getStatusHealthMeta,
+} from '../../data/initialData';
 import {
   AuditLogEntry,
+  CenterAccentColor,
   isMassStopIssueStatus,
   IssueItem,
   LineCharacteristic,
@@ -26,20 +34,27 @@ import {
   MASS_LINE_STATUSES,
   NEW_LINE_STATUSES,
   PipelineItem,
+  ProductionCenter,
   ProductionLine,
 } from '../../types/production';
 
 interface AdminAuthModalProps {
   isOpen: boolean;
+  centerCode?: string;
   onClose: () => void;
   onAuthenticate: (reason: string) => void;
 }
 
-export function AdminAuthModal({ isOpen, onClose, onAuthenticate }: AdminAuthModalProps) {
+export function AdminAuthModal({
+  isOpen,
+  centerCode = 'KHV',
+  onClose,
+  onAuthenticate,
+}: AdminAuthModalProps) {
   const [password, setPassword] = useState('');
-  const [reasonSelect, setReasonSelect] = useState('Tăng công suất theo kế hoạch KHV mới');
+  const [reasonSelect, setReasonSelect] = useState('Tăng công suất theo kế hoạch mới');
   const [reasonDetail, setReasonDetail] = useState(
-    'Điều chỉnh định mức theo chỉ thị vận hành số #KHV-402 ngày hôm nay.'
+    `Điều chỉnh quản trị vận hành hệ thống ${centerCode} ngày hôm nay.`
   );
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -53,10 +68,10 @@ export function AdminAuthModal({ isOpen, onClose, onAuthenticate }: AdminAuthMod
             <Shield className="w-5 h-5" />
             <div>
               <h3 className="text-base font-bold text-white">
-                Xác thực quyền Admin hệ thống KHV
+                Xác thực quyền Admin ({centerCode})
               </h3>
               <p className="text-xs text-blue-100 mt-0.5">
-                Phê duyệt chỉnh sửa thông tin Line &amp; định mức Target Demand
+                Phê duyệt chỉnh sửa Line, quản lý Trung tâm &amp; định mức Target Demand
               </p>
             </div>
           </div>
@@ -86,7 +101,7 @@ export function AdminAuthModal({ isOpen, onClose, onAuthenticate }: AdminAuthMod
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-blue-800">
             <div className="flex items-center justify-between font-semibold">
               <span>
-                Người thực hiện: <strong>Admin_KHV</strong>
+                Người thực hiện: <strong>Admin_{centerCode}</strong>
               </span>
               <span className="text-[11px] text-blue-600">Ca trực sản xuất</span>
             </div>
@@ -910,6 +925,7 @@ export function IssueDetailModal({ issue, onClose, onSaveProgress }: IssueDetail
 
 interface AddLineModalProps {
   isOpen: boolean;
+  centerCode?: string;
   nextLineNumber: number;
   onClose: () => void;
   onCreateLine: (line: ProductionLine) => void;
@@ -917,12 +933,14 @@ interface AddLineModalProps {
 
 export function AddLineModal({
   isOpen,
+  centerCode = 'KHV',
   nextLineNumber,
   onClose,
   onCreateLine,
 }: AddLineModalProps) {
   const [lineName, setLineName] = useState(`Line ${nextLineNumber}`);
   const [stage, setStage] = useState('Final Inspection & QA');
+  const [factory, setFactory] = useState<string>(DEFAULT_FACTORIES[0]);
   const [characteristic, setCharacteristic] = useState<LineCharacteristic>('new');
   const [statusLabel, setStatusLabel] = useState<LineHealthStatus>('Đang Lắp Ráp');
   const [progress, setProgress] = useState(80);
@@ -932,6 +950,7 @@ export function AddLineModal({
   useEffect(() => {
     setLineName(`Line ${nextLineNumber}`);
     setLeader(`Trần Quốc Thắng (Kỹ sư Line ${nextLineNumber})`);
+    setFactory(DEFAULT_FACTORIES[0]);
     setCharacteristic('new');
     setStatusLabel('Đang Lắp Ráp');
   }, [nextLineNumber, isOpen]);
@@ -949,7 +968,7 @@ export function AddLineModal({
                 Khởi Tạo Dây Chuyền Sản Xuất Mới (Admin Line Provisioning)
               </h3>
               <p className="text-xs text-blue-100 mt-0.5">
-                Thêm dây chuyền mới vào hệ thống điều phối Trung tâm KHV
+                Thêm dây chuyền mới vào hệ thống điều phối Trung tâm {centerCode}
               </p>
             </div>
           </div>
@@ -977,11 +996,14 @@ export function AddLineModal({
             const autoIssueForStop =
               characteristic === 'mas' && isMassStopIssueStatus(finalStatus);
             const finalIssueCount = autoIssueForStop ? Math.max(1, issueCount) : issueCount;
+            const healthMeta = getStatusHealthMeta(finalStatus, finalIssueCount);
             onCreateLine({
               id: `line-${nextLineNumber}-${Date.now()}`,
+              lineCode: `${centerCode.slice(0, 3)}-${String(nextLineNumber).padStart(2, '0')}`,
               name: lineName,
               stage: `${lineName} - ${stage}`,
               shortStage: stage.split(' ')[0] || 'QA',
+              factory,
               characteristic,
               vtPercent:
                 finalStatus === 'Mass Ready' ||
@@ -992,52 +1014,11 @@ export function AddLineModal({
               healthPercent: progress,
               issueCount: finalIssueCount,
               statusLabel: finalStatus,
-              healthBadge:
-                finalStatus === 'Dừng do Máy hỏng' ||
-                finalStatus === 'Dừng do Lỗi thao tác' ||
-                finalStatus === 'Dừng Chất lượng' ||
-                finalStatus === 'Dừng do Sự cố điện' ||
-                finalStatus === 'Tạm Hoãn'
-                  ? 'Nút thắt cổ chai'
-                  : finalStatus === 'Dừng do Vật liệu' || finalStatus === 'Chờ Vật Tư'
-                  ? 'Cần bổ sung vật tư'
-                  : finalStatus === 'Dừng do Hết Plan'
-                  ? 'Chờ kế hoạch'
-                  : finalStatus === 'Dừng do Thiếu người' ||
-                    finalStatus === 'Dừng Bảo dưỡng' ||
-                    finalStatus === 'Dừng Vệ Sinh' ||
-                    finalStatus === 'Dừng do Lỗi khác' ||
-                    finalStatus === 'Đang Lắp Ráp' ||
-                    finalStatus === 'Đang cài đặt' ||
-                    finalStatus === 'Test Lại'
-                  ? 'Chờ kiểm tra'
-                  : finalStatus === 'Chạy thử'
-                  ? 'Sắp hoàn thành'
-                  : issueCount > 0
-                  ? 'Cần theo dõi'
-                  : 'Ổn định',
-              healthTone:
-                finalStatus === 'Dừng do Máy hỏng' ||
-                finalStatus === 'Dừng do Lỗi thao tác' ||
-                finalStatus === 'Dừng Chất lượng' ||
-                finalStatus === 'Dừng do Sự cố điện' ||
-                finalStatus === 'Tạm Hoãn'
-                  ? 'rose'
-                  : finalStatus === 'Dừng do Vật liệu' ||
-                    finalStatus === 'Dừng do Thiếu người' ||
-                    finalStatus === 'Dừng Bảo dưỡng' ||
-                    finalStatus === 'Dừng Vệ Sinh' ||
-                    finalStatus === 'Dừng do Lỗi khác' ||
-                    finalStatus === 'Dừng do Hết Plan' ||
-                    finalStatus === 'Chờ Vật Tư' ||
-                    finalStatus === 'Đang Lắp Ráp' ||
-                    finalStatus === 'Đang cài đặt' ||
-                    finalStatus === 'Test Lại' ||
-                    issueCount > 1
-                  ? 'amber'
-                  : 'emerald',
+              healthBadge: healthMeta.healthBadge,
+              healthTone: healthMeta.healthTone,
               leader,
               updatedAt: formatLineTimestamp(),
+              keyMachines: createDefaultKeyMachines(`line-${nextLineNumber}`, nextLineNumber),
             });
             onClose();
           }}
@@ -1045,7 +1026,7 @@ export function AddLineModal({
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-blue-800 flex items-center justify-between">
             <div>
               <span className="font-bold block">
-                Hệ thống tự động liên kết: Trung tâm KHV → {lineName}
+                Hệ thống tự động liên kết: Trung tâm {centerCode} → {lineName}
               </span>
               <span className="text-[11px] text-slate-600">
                 Được cấp quyền bởi quản trị viên hệ thống (Admin)
@@ -1080,6 +1061,22 @@ export function AddLineModal({
                 <option value="Burn-in Test">Burn-in Test &amp; Lão Hóa</option>
                 <option value="Coating & Potting">Phủ Keo Bảo Vệ (Coating)</option>
                 <option value="Sub-assembly">Lắp ráp cụm phụ (Sub-assembly)</option>
+              </select>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block font-semibold text-slate-700 mb-1">
+                Nhà máy quản lý *
+              </label>
+              <select
+                value={factory}
+                onChange={(e) => setFactory(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 text-xs px-3 py-2 bg-white font-semibold"
+              >
+                {DEFAULT_FACTORIES.map((fac) => (
+                  <option key={fac} value={fac}>
+                    {fac}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
@@ -1206,6 +1203,379 @@ export function AddLineModal({
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+interface CenterManagementModalProps {
+  isOpen: boolean;
+  centers: ProductionCenter[];
+  activeCenterId: string;
+  isAdminMode: boolean;
+  onRequestAdminAuth: () => void;
+  onSelectCenter: (centerId: string) => void;
+  onAddCenter: (payload: {
+    code: string;
+    name: string;
+    subtitle: string;
+    accentColor: CenterAccentColor;
+    initialLineCount: number;
+  }) => void;
+  onDeleteCenter: (centerId: string) => void;
+  onClose: () => void;
+}
+
+export function CenterManagementModal({
+  isOpen,
+  centers,
+  activeCenterId,
+  isAdminMode,
+  onRequestAdminAuth,
+  onSelectCenter,
+  onAddCenter,
+  onDeleteCenter,
+  onClose,
+}: CenterManagementModalProps) {
+  const [code, setCode] = useState('');
+  const [name, setName] = useState('');
+  const [subtitle, setSubtitle] = useState('Hub Vận Hành');
+  const [accentColor, setAccentColor] = useState<CenterAccentColor>('emerald');
+  const [initialLineCount, setInitialLineCount] = useState(4);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState('');
+
+  useEffect(() => {
+    if (isOpen) {
+      setCode('');
+      setName('');
+      setSubtitle('Hub Vận Hành');
+      setAccentColor('emerald');
+      setInitialLineCount(4);
+      setConfirmDeleteId(null);
+      setErrorMsg('');
+    }
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  const normalizedCode = code.trim().toUpperCase();
+  const isDuplicateCode = centers.some((c) => c.code.toUpperCase() === normalizedCode);
+
+  const colorChips: { key: CenterAccentColor; label: string; dot: string }[] = [
+    { key: 'blue', label: 'Xanh dương', dot: 'bg-blue-600' },
+    { key: 'indigo', label: 'Tím chàm', dot: 'bg-indigo-600' },
+    { key: 'emerald', label: 'Xanh ngọc', dot: 'bg-emerald-600' },
+    { key: 'amber', label: 'Cam hổ phách', dot: 'bg-amber-500' },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6">
+      <div className="relative bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-slate-200 flex flex-col max-h-[90vh] overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-slate-800 to-blue-900 text-white flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            <Layers className="w-5 h-5 text-cyan-300" />
+            <div>
+              <h3 className="text-base font-bold text-white">
+                Quản Lý &amp; Thêm / Bớt Trung Tâm Sản Xuất (Admin)
+              </h3>
+              <p className="text-xs text-slate-300 mt-0.5">
+                Mở rộng hoặc gỡ bỏ các trung tâm điều phối độc lập (VD: KHV, DAALL...)
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-6 overflow-y-auto space-y-5 text-xs">
+          {!isAdminMode && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 p-3.5 flex items-center justify-between gap-3">
+              <div className="text-amber-900">
+                <strong className="block">Chức năng thêm / bớt Trung tâm yêu cầu quyền Admin</strong>
+                <span className="text-[11px]">
+                  Vui lòng xác thực mật khẩu Admin để thêm trung tâm mới hoặc xóa trung tâm.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={onRequestAdminAuth}
+                className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold cursor-pointer"
+              >
+                <Lock className="w-3.5 h-3.5" />
+                <span>Mở khóa Admin</span>
+              </button>
+            </div>
+          )}
+
+          {/* Existing Centers List */}
+          <div className="space-y-2.5">
+            <div className="flex items-center justify-between">
+              <h4 className="font-bold text-slate-900">
+                Danh sách Trung tâm đang hoạt động ({centers.length})
+              </h4>
+              <span className="text-[11px] text-slate-500">
+                Tối thiểu phải giữ lại 1 trung tâm trên hệ thống
+              </span>
+            </div>
+
+            <div className="space-y-2">
+              {centers.map((center) => {
+                const isActive = center.id === activeCenterId;
+                const openIssues = center.issues.filter((i) => i.progress < 100).length;
+                const isConfirming = confirmDeleteId === center.id;
+                const badgeColor =
+                  center.accentColor === 'indigo'
+                    ? 'bg-indigo-600'
+                    : center.accentColor === 'emerald'
+                    ? 'bg-emerald-600'
+                    : center.accentColor === 'amber'
+                    ? 'bg-amber-600'
+                    : 'bg-blue-700';
+
+                return (
+                  <div
+                    key={center.id}
+                    className={`rounded-xl border p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                      isActive ? 'border-blue-400 bg-blue-50/60' : 'border-slate-200 bg-slate-50/60'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span
+                        className={`px-2.5 py-1.5 rounded-lg text-white font-extrabold text-xs shrink-0 ${badgeColor}`}
+                      >
+                        {center.code}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-slate-900 truncate">{center.name}</span>
+                          {isActive && (
+                            <span className="px-1.5 py-0.5 rounded bg-blue-600 text-white text-[10px] font-bold">
+                              Đang mở
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[11px] text-slate-500 block mt-0.5">
+                          {center.subtitle} · {center.lines.length} Line · {openIssues} Issue đang mở
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                      {!isActive && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onSelectCenter(center.id);
+                            onClose();
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-semibold cursor-pointer"
+                        >
+                          Chuyển tới
+                        </button>
+                      )}
+
+                      {isAdminMode && centers.length > 1 && (
+                        !isConfirming ? (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteId(center.id)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white font-semibold transition cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Bớt / Xóa</span>
+                          </button>
+                        ) : (
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onDeleteCenter(center.id);
+                                setConfirmDeleteId(null);
+                              }}
+                              className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer"
+                            >
+                              Xác nhận xóa {center.code}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteId(null)}
+                              className="px-2 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-600 cursor-pointer"
+                            >
+                              Hủy
+                            </button>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Add New Center Form (Admin) */}
+          <form
+            className={`rounded-xl border p-4 space-y-3 ${
+              isAdminMode ? 'border-blue-200 bg-blue-50/40' : 'border-slate-200 bg-slate-50 opacity-75'
+            }`}
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!isAdminMode) {
+                onRequestAdminAuth();
+                return;
+              }
+              if (!normalizedCode || !name.trim()) {
+                setErrorMsg('Vui lòng nhập đầy đủ Mã Trung tâm và Tên Trung tâm.');
+                return;
+              }
+              if (isDuplicateCode) {
+                setErrorMsg(`Mã Trung tâm "${normalizedCode}" đã tồn tại.`);
+                return;
+              }
+              setErrorMsg('');
+              onAddCenter({
+                code: normalizedCode,
+                name: name.trim(),
+                subtitle: subtitle.trim() || `Hub Vận Hành ${normalizedCode}`,
+                accentColor,
+                initialLineCount,
+              });
+              setCode('');
+              setName('');
+            }}
+          >
+            <div className="flex items-center gap-2 font-bold text-slate-900">
+              <PlusCircle className="w-4 h-4 text-blue-600" />
+              <span>Thêm Trung Tâm Mới (Admin)</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Mã Trung tâm (trên Hub) *
+                </label>
+                <input
+                  type="text"
+                  maxLength={10}
+                  disabled={!isAdminMode}
+                  value={code}
+                  onChange={(e) => {
+                    setCode(e.target.value.toUpperCase());
+                    if (errorMsg) setErrorMsg('');
+                  }}
+                  placeholder="VD: DAALL2, SMT, PACK..."
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-extrabold uppercase text-slate-900 disabled:bg-slate-100"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Tên đầy đủ Trung tâm *
+                </label>
+                <input
+                  type="text"
+                  disabled={!isAdminMode}
+                  value={name}
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    if (errorMsg) setErrorMsg('');
+                  }}
+                  placeholder="VD: Trung tâm Điều phối Cụm B"
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-semibold text-slate-900 disabled:bg-slate-100"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Nhãn phụ trên vòng tròn Hub
+                </label>
+                <input
+                  type="text"
+                  maxLength={24}
+                  disabled={!isAdminMode}
+                  value={subtitle}
+                  onChange={(e) => setSubtitle(e.target.value)}
+                  placeholder="VD: Hub Vận Hành"
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-800 disabled:bg-slate-100"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Số Line khởi tạo ban đầu (0 - 10)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={10}
+                  disabled={!isAdminMode}
+                  value={initialLineCount}
+                  onChange={(e) =>
+                    setInitialLineCount(Math.max(0, Math.min(10, Number(e.target.value) || 0)))
+                  }
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-bold tabular-nums disabled:bg-slate-100"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block font-semibold text-slate-700 mb-1.5">
+                  Màu nhận diện Trung tâm
+                </label>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {colorChips.map((chip) => (
+                    <button
+                      key={chip.key}
+                      type="button"
+                      disabled={!isAdminMode}
+                      onClick={() => setAccentColor(chip.key)}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold cursor-pointer transition ${
+                        accentColor === chip.key
+                          ? 'border-blue-600 bg-blue-50 text-blue-900'
+                          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span className={`w-2.5 h-2.5 rounded-full ${chip.dot}`} />
+                      <span>{chip.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {errorMsg && <p className="text-[11px] font-bold text-rose-600">{errorMsg}</p>}
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="submit"
+                disabled={!isAdminMode}
+                className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg font-bold transition ${
+                  isAdminMode
+                    ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm cursor-pointer'
+                    : 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                }`}
+              >
+                <PlusCircle className="w-4 h-4" />
+                <span>Thêm Trung Tâm Mới</span>
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div className="px-6 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-1.5 rounded-lg bg-white border border-slate-200 font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
+          >
+            Đóng
+          </button>
+        </div>
       </div>
     </div>
   );

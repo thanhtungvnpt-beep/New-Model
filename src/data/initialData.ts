@@ -1,4 +1,75 @@
-import { AuditLogEntry, IssueItem, PipelineItem, ProductionLine } from '../types/production';
+import {
+  AuditLogEntry,
+  CenterAccentColor,
+  IssueItem,
+  LineHealthStatus,
+  LineKeyMachine,
+  PipelineItem,
+  ProductionCenter,
+  ProductionLine,
+} from '../types/production';
+
+export const DEFAULT_FACTORIES = [
+  'Nhà máy 1 (NM1)',
+  'Nhà máy 2 (NM2)',
+  'Nhà máy 3 (NM3)',
+] as const;
+
+export function getLineFactory(line: Pick<ProductionLine, 'factory'>): string {
+  return line.factory?.trim() || DEFAULT_FACTORIES[0];
+}
+
+export function getShortFactoryLabel(factory: string): string {
+  const parenMatch = /\(([^)]+)\)/.exec(factory);
+  if (parenMatch) return parenMatch[1].trim();
+  const trimmed = factory.trim();
+  return trimmed.length <= 12 ? trimmed : `${trimmed.slice(0, 11)}…`;
+}
+
+export function getStatusHealthMeta(
+  status: LineHealthStatus,
+  issueCount = 0
+): { healthBadge: string; healthTone: 'emerald' | 'amber' | 'rose' } {
+  if (
+    status === 'Dừng do Máy hỏng' ||
+    status === 'Dừng do Lỗi thao tác' ||
+    status === 'Dừng Chất lượng' ||
+    status === 'Dừng do Sự cố điện' ||
+    status === 'Tạm Hoãn'
+  ) {
+    return { healthBadge: 'Nút thắt cổ chai', healthTone: 'rose' };
+  }
+  if (status === 'Dừng do Vật liệu' || status === 'Chờ Vật Tư') {
+    return { healthBadge: 'Cần bổ sung vật tư', healthTone: 'amber' };
+  }
+  if (status === 'Dừng do Hết Plan') {
+    return { healthBadge: 'Chờ kế hoạch', healthTone: 'amber' };
+  }
+  if (status === 'Đang tháo chuyển') {
+    return { healthBadge: 'Đang di dời NM', healthTone: 'amber' };
+  }
+  if (status === 'Đã chuyển') {
+    return { healthBadge: 'Đã chuyển NM', healthTone: 'emerald' };
+  }
+  if (
+    status === 'Dừng do Thiếu người' ||
+    status === 'Dừng Bảo dưỡng' ||
+    status === 'Dừng Vệ Sinh' ||
+    status === 'Dừng do Lỗi khác' ||
+    status === 'Đang Lắp Ráp' ||
+    status === 'Đang cài đặt' ||
+    status === 'Test Lại'
+  ) {
+    return { healthBadge: 'Chờ kiểm tra', healthTone: 'amber' };
+  }
+  if (status === 'Chạy thử') {
+    return { healthBadge: 'Sắp hoàn thành', healthTone: 'emerald' };
+  }
+  if (issueCount > 1) {
+    return { healthBadge: 'Cần theo dõi', healthTone: 'amber' };
+  }
+  return { healthBadge: 'Ổn định', healthTone: 'emerald' };
+}
 
 export function getTodayIsoDate(): string {
   const now = new Date();
@@ -45,6 +116,36 @@ export function formatLineTimestamp(date = new Date()): string {
   return `${time} · ${day}/${month}`;
 }
 
+export function createDefaultKeyMachines(prefix = 'line', lineSubnet = 1): LineKeyMachine[] {
+  return [
+    {
+      id: `${prefix}-m-a`,
+      name: 'Máy A',
+      ip: `192.168.${lineSubnet}.11`,
+      status: 'Hoạt động tốt',
+    },
+    {
+      id: `${prefix}-m-b`,
+      name: 'Máy B',
+      ip: `192.168.${lineSubnet}.12`,
+      status: 'Hoạt động tốt',
+    },
+    {
+      id: `${prefix}-m-c`,
+      name: 'Máy C',
+      ip: `192.168.${lineSubnet}.13`,
+      status: 'Hoạt động tốt',
+    },
+  ];
+}
+
+export function getDefaultLineCode(line: Pick<ProductionLine, 'id' | 'name' | 'lineCode'>): string {
+  if (line.lineCode?.trim()) return line.lineCode.trim();
+  const match = /(\d+)/.exec(line.name) || /(\d+)/.exec(line.id);
+  const num = match ? Number(match[1]) : 1;
+  return `LN-${String(num).padStart(2, '0')}`;
+}
+
 export function isLineCompleted(line: Pick<ProductionLine, 'statusLabel' | 'vtPercent' | 'healthPercent' | 'issueCount'>): boolean {
   if (
     line.statusLabel === 'Dừng do Máy hỏng' ||
@@ -57,6 +158,8 @@ export function isLineCompleted(line: Pick<ProductionLine, 'statusLabel' | 'vtPe
     line.statusLabel === 'Dừng Vệ Sinh' ||
     line.statusLabel === 'Dừng do Lỗi khác' ||
     line.statusLabel === 'Dừng do Hết Plan' ||
+    line.statusLabel === 'Đang tháo chuyển' ||
+    line.statusLabel === 'Đã chuyển' ||
     line.statusLabel === 'Tạm Hoãn'
   ) {
     return false;
@@ -73,6 +176,7 @@ const TODAY_ISO = getTodayIsoDate();
 export const INITIAL_LINES: ProductionLine[] = [
   {
     id: 'line-1',
+    lineCode: 'LN-01',
     name: 'Line 1',
     stage: 'Line 1 - SMT Assembly',
     shortStage: 'CNC',
@@ -85,6 +189,7 @@ export const INITIAL_LINES: ProductionLine[] = [
     healthTone: 'emerald',
     leader: 'Lê Hoàng Đức',
     updatedAt: `08:40 · ${formatViDateShort(TODAY_ISO)}`,
+    keyMachines: createDefaultKeyMachines('line-1', 1),
     setupTimeline: {
       currentDate: TODAY_ISO,
       targetDate: TODAY_ISO,
@@ -93,6 +198,7 @@ export const INITIAL_LINES: ProductionLine[] = [
   },
   {
     id: 'line-2',
+    lineCode: 'LN-02',
     name: 'Line 2',
     stage: 'Line 2 - Wave Soldering',
     shortStage: 'CNC.',
@@ -105,6 +211,7 @@ export const INITIAL_LINES: ProductionLine[] = [
     healthTone: 'emerald',
     leader: 'Phạm Minh Hoàng',
     updatedAt: `08:35 · ${formatViDateShort(TODAY_ISO)}`,
+    keyMachines: createDefaultKeyMachines('line-2', 2),
     setupTimeline: {
       currentDate: TODAY_ISO,
       targetDate: TODAY_ISO,
@@ -113,6 +220,7 @@ export const INITIAL_LINES: ProductionLine[] = [
   },
   {
     id: 'line-3',
+    lineCode: 'LN-03',
     name: 'Line 3',
     stage: 'Line 3 - Manual Assembly',
     shortStage: 'CNC',
@@ -125,6 +233,11 @@ export const INITIAL_LINES: ProductionLine[] = [
     healthTone: 'rose',
     leader: 'Nguyễn Văn Tuấn',
     updatedAt: `08:15 · ${formatViDateShort(TODAY_ISO)}`,
+    keyMachines: [
+      { id: 'line-3-m-a', name: 'Máy A', ip: '192.168.3.11', status: 'Hoạt động tốt' },
+      { id: 'line-3-m-b', name: 'Máy B', ip: '192.168.3.12', status: 'Cần theo dõi', note: 'Đang căn chỉnh JIG' },
+      { id: 'line-3-m-c', name: 'Máy C', ip: '192.168.3.13', status: 'Hoạt động tốt' },
+    ],
     setupTimeline: {
       currentDate: TODAY_ISO,
       targetDate: addDaysToIso(TODAY_ISO, 3),
@@ -133,6 +246,7 @@ export const INITIAL_LINES: ProductionLine[] = [
   },
   {
     id: 'line-4',
+    lineCode: 'LN-04',
     name: 'Line 4',
     stage: 'Line 4 - Function Test',
     shortStage: 'CNC',
@@ -145,6 +259,7 @@ export const INITIAL_LINES: ProductionLine[] = [
     healthTone: 'emerald',
     leader: 'Đặng Quốc Bảo',
     updatedAt: `08:30 · ${formatViDateShort(TODAY_ISO)}`,
+    keyMachines: createDefaultKeyMachines('line-4', 4),
     setupTimeline: {
       currentDate: TODAY_ISO,
       targetDate: addDaysToIso(TODAY_ISO, 2),
@@ -153,6 +268,7 @@ export const INITIAL_LINES: ProductionLine[] = [
   },
   {
     id: 'line-5',
+    lineCode: 'LN-05',
     name: 'Line 5',
     stage: 'Line 5 - Final Packing',
     shortStage: 'Block',
@@ -165,6 +281,11 @@ export const INITIAL_LINES: ProductionLine[] = [
     healthTone: 'rose',
     leader: 'Trần Thị Mai',
     updatedAt: `08:05 · ${formatViDateShort(TODAY_ISO)}`,
+    keyMachines: [
+      { id: 'line-5-m-a', name: 'Máy A', ip: '192.168.5.11', status: 'Hoạt động tốt' },
+      { id: 'line-5-m-b', name: 'Máy B', ip: '192.168.5.12', status: 'Dừng lỗi', note: 'Đang xử lý sự cố máy' },
+      { id: 'line-5-m-c', name: 'Máy C', ip: '192.168.5.13', status: 'Cần theo dõi' },
+    ],
     setupTimeline: {
       currentDate: TODAY_ISO,
       targetDate: addDaysToIso(TODAY_ISO, 2),
@@ -173,6 +294,7 @@ export const INITIAL_LINES: ProductionLine[] = [
   },
   {
     id: 'line-6',
+    lineCode: 'LN-06',
     name: 'Line 6',
     stage: 'Line 6 - Sub-assembly',
     shortStage: 'Block',
@@ -185,6 +307,7 @@ export const INITIAL_LINES: ProductionLine[] = [
     healthTone: 'emerald',
     leader: 'Trần Quốc Thắng',
     updatedAt: `08:20 · ${formatViDateShort(TODAY_ISO)}`,
+    keyMachines: createDefaultKeyMachines('line-6', 6),
     setupTimeline: {
       currentDate: TODAY_ISO,
       targetDate: addDaysToIso(TODAY_ISO, 4),
@@ -193,6 +316,7 @@ export const INITIAL_LINES: ProductionLine[] = [
   },
   {
     id: 'line-7',
+    lineCode: 'LN-07',
     name: 'Line 7',
     stage: 'Line 7 - AOI Inspection',
     shortStage: 'Block',
@@ -205,6 +329,7 @@ export const INITIAL_LINES: ProductionLine[] = [
     healthTone: 'emerald',
     leader: 'Vũ Đình Toàn',
     updatedAt: `08:10 · ${formatViDateShort(TODAY_ISO)}`,
+    keyMachines: createDefaultKeyMachines('line-7', 7),
     setupTimeline: {
       currentDate: TODAY_ISO,
       targetDate: addDaysToIso(TODAY_ISO, 1),
@@ -213,6 +338,7 @@ export const INITIAL_LINES: ProductionLine[] = [
   },
   {
     id: 'line-8',
+    lineCode: 'LN-08',
     name: 'Line 8',
     stage: 'Line 8 - ICT Testing',
     shortStage: 'Burn-in',
@@ -225,6 +351,11 @@ export const INITIAL_LINES: ProductionLine[] = [
     healthTone: 'amber',
     leader: 'Lê Văn Thành',
     updatedAt: `08:10 · ${formatViDateShort(TODAY_ISO)}`,
+    keyMachines: [
+      { id: 'line-8-m-a', name: 'Máy A', ip: '192.168.8.11', status: 'Cần theo dõi' },
+      { id: 'line-8-m-b', name: 'Máy B', ip: '192.168.8.12', status: 'Hoạt động tốt' },
+      { id: 'line-8-m-c', name: 'Máy C', ip: '192.168.8.13', status: 'Hoạt động tốt' },
+    ],
     setupTimeline: {
       currentDate: TODAY_ISO,
       targetDate: addDaysToIso(TODAY_ISO, 3),
@@ -233,6 +364,7 @@ export const INITIAL_LINES: ProductionLine[] = [
   },
   {
     id: 'line-9',
+    lineCode: 'LN-09',
     name: 'Line 9',
     stage: 'Line 9 - Conformal Coating',
     shortStage: 'Block',
@@ -245,6 +377,7 @@ export const INITIAL_LINES: ProductionLine[] = [
     healthTone: 'emerald',
     leader: 'Nguyễn Văn Tuấn',
     updatedAt: `08:25 · ${formatViDateShort(TODAY_ISO)}`,
+    keyMachines: createDefaultKeyMachines('line-9', 9),
     setupTimeline: {
       currentDate: TODAY_ISO,
       targetDate: addDaysToIso(TODAY_ISO, 5),
@@ -253,6 +386,7 @@ export const INITIAL_LINES: ProductionLine[] = [
   },
   {
     id: 'line-10',
+    lineCode: 'LN-10',
     name: 'Line 10',
     stage: 'Line 10 - Quality Audit',
     shortStage: 'Block',
@@ -265,6 +399,7 @@ export const INITIAL_LINES: ProductionLine[] = [
     healthTone: 'amber',
     leader: 'Lê Hoàng Đức',
     updatedAt: `08:05 · ${formatViDateShort(TODAY_ISO)}`,
+    keyMachines: createDefaultKeyMachines('line-10', 10),
     setupTimeline: {
       currentDate: TODAY_ISO,
       targetDate: addDaysToIso(TODAY_ISO, 2),
@@ -745,3 +880,357 @@ export function downloadCsvFile(filename: string, headers: string[], rows: (stri
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
+
+export const DAALL_LINES: ProductionLine[] = [
+  {
+    id: 'daall-line-1',
+    lineCode: 'DA-01',
+    name: 'Line D1',
+    stage: 'Line D1 - Auto Assembly',
+    shortStage: 'Auto',
+    factory: 'Nhà máy 1 (NM1)',
+    characteristic: 'mas',
+    vtPercent: 100,
+    healthPercent: 92,
+    issueCount: 0,
+    statusLabel: 'Đang sản xuất',
+    healthBadge: 'Ổn định',
+    healthTone: 'emerald',
+    leader: 'Phạm Minh Hoàng',
+    updatedAt: `08:50 · ${formatViDateShort(TODAY_ISO)}`,
+    keyMachines: createDefaultKeyMachines('daall-line-1', 21),
+    setupTimeline: {
+      currentDate: TODAY_ISO,
+      targetDate: TODAY_ISO,
+      expectedDate: TODAY_ISO,
+    },
+  },
+  {
+    id: 'daall-line-2',
+    lineCode: 'DA-02',
+    name: 'Line D2',
+    stage: 'Line D2 - AOI & Laser Marking',
+    shortStage: 'AOI',
+    factory: 'Nhà máy 1 (NM1)',
+    characteristic: 'mas',
+    vtPercent: 100,
+    healthPercent: 86,
+    issueCount: 0,
+    statusLabel: 'Đang sản xuất',
+    healthBadge: 'Tối ưu',
+    healthTone: 'emerald',
+    leader: 'Nguyễn Văn Tuấn',
+    updatedAt: `08:42 · ${formatViDateShort(TODAY_ISO)}`,
+    keyMachines: createDefaultKeyMachines('daall-line-2', 22),
+    setupTimeline: {
+      currentDate: TODAY_ISO,
+      targetDate: TODAY_ISO,
+      expectedDate: TODAY_ISO,
+    },
+  },
+  {
+    id: 'daall-line-3',
+    lineCode: 'DA-03',
+    name: 'Line D3',
+    stage: 'Line D3 - Function Calibration',
+    shortStage: 'Calib',
+    factory: 'Nhà máy 2 (NM2)',
+    characteristic: 'new',
+    vtPercent: 80,
+    healthPercent: 72,
+    issueCount: 1,
+    statusLabel: 'Đang cài đặt',
+    healthBadge: 'Chờ kiểm tra',
+    healthTone: 'amber',
+    leader: 'Trần Quốc Thắng',
+    updatedAt: `08:25 · ${formatViDateShort(TODAY_ISO)}`,
+    keyMachines: [
+      { id: 'daall-line-3-m-a', name: 'Máy A', ip: '192.168.23.11', status: 'Hoạt động tốt' },
+      { id: 'daall-line-3-m-b', name: 'Máy B', ip: '192.168.23.12', status: 'Cần theo dõi' },
+      { id: 'daall-line-3-m-c', name: 'Máy C', ip: '192.168.23.13', status: 'Hoạt động tốt' },
+    ],
+    setupTimeline: {
+      currentDate: TODAY_ISO,
+      targetDate: addDaysToIso(TODAY_ISO, 4),
+      expectedDate: addDaysToIso(TODAY_ISO, 3),
+    },
+  },
+  {
+    id: 'daall-line-4',
+    lineCode: 'DA-04',
+    name: 'Line D4',
+    stage: 'Line D4 - High-Speed Test',
+    shortStage: 'Test',
+    factory: 'Nhà máy 2 (NM2)',
+    characteristic: 'new',
+    vtPercent: 95,
+    healthPercent: 88,
+    issueCount: 0,
+    statusLabel: 'Chạy thử',
+    healthBadge: 'Sắp hoàn thành',
+    healthTone: 'emerald',
+    leader: 'Trần Thị Mai',
+    updatedAt: `08:45 · ${formatViDateShort(TODAY_ISO)}`,
+    keyMachines: createDefaultKeyMachines('daall-line-4', 24),
+    setupTimeline: {
+      currentDate: TODAY_ISO,
+      targetDate: addDaysToIso(TODAY_ISO, 2),
+      expectedDate: addDaysToIso(TODAY_ISO, 1),
+    },
+  },
+  {
+    id: 'daall-line-5',
+    lineCode: 'DA-05',
+    name: 'Line D5',
+    stage: 'Line D5 - Packing & Aging',
+    shortStage: 'Pack',
+    factory: 'Nhà máy 3 (NM3)',
+    characteristic: 'mas',
+    vtPercent: 65,
+    healthPercent: 58,
+    issueCount: 1,
+    statusLabel: 'Dừng do Vật liệu',
+    healthBadge: 'Cần bổ sung vật tư',
+    healthTone: 'amber',
+    leader: 'Vũ Đình Toàn',
+    updatedAt: `08:10 · ${formatViDateShort(TODAY_ISO)}`,
+    keyMachines: createDefaultKeyMachines('daall-line-5', 25),
+    setupTimeline: {
+      currentDate: TODAY_ISO,
+      targetDate: TODAY_ISO,
+      expectedDate: TODAY_ISO,
+    },
+  },
+];
+
+export const DAALL_PIPELINE_ITEMS: PipelineItem[] = [
+  {
+    itemNo: 'D1',
+    name: 'Module DA-Core',
+    badgeColor: 'indigo',
+    targetDemand: 12,
+    toBuy: 12,
+    inWarehouse: 12,
+    vendorInbound: 12,
+    stagedOnLine: 11,
+    lineTested: 11,
+    purchaseIssue: '',
+    vendorIssue: '',
+  },
+  {
+    itemNo: 'D2',
+    name: 'Sensor Array X2',
+    badgeColor: 'blue',
+    targetDemand: 10,
+    toBuy: 10,
+    inWarehouse: 10,
+    vendorInbound: 9,
+    stagedOnLine: 9,
+    lineTested: 8,
+    purchaseIssue: 'Chờ lô hiệu chuẩn Sensor từ Vendor K',
+    vendorIssue: 'Đang kiểm định 1 kiện cuối tại cổng NM2',
+  },
+  {
+    itemNo: 'D3',
+    name: 'Housing Alu-Pro',
+    badgeColor: 'amber',
+    targetDemand: 14,
+    toBuy: 14,
+    inWarehouse: 11,
+    vendorInbound: 11,
+    stagedOnLine: 9,
+    lineTested: 9,
+    purchaseIssue: 'Thiếu 3 bộ vỏ nhôm anodize cho Line D5',
+    vendorIssue: '',
+  },
+  {
+    itemNo: 'D4',
+    name: 'Harness Cable Pro',
+    badgeColor: 'teal',
+    targetDemand: 16,
+    toBuy: 16,
+    inWarehouse: 16,
+    vendorInbound: 16,
+    stagedOnLine: 15,
+    lineTested: 14,
+    purchaseIssue: '',
+    vendorIssue: '',
+  },
+];
+
+export const DAALL_ISSUES: IssueItem[] = [
+  {
+    id: 'ISS-201',
+    line: 'Line D3',
+    itemCode: 'D2 - Sensor Array X2',
+    title: 'Chờ đồng bộ Firmware hiệu chuẩn trên Máy B (Line D3)',
+    description: 'Cần nạp bản firmware v2.4 cho trạm hiệu chuẩn Máy B trước khi chạy thử nghiệm.',
+    severity: 'medium',
+    assignee: 'Trần Quốc Thắng',
+    assigneeRole: 'Kỹ sư Line D3',
+    duration: '45m',
+    sinceTime: 'Từ 08:15',
+    statusText: 'Đang nạp firmware',
+    progress: 50,
+    notes: 'Đã kết nối mạng LAN nội bộ 192.168.23.12, đang test 5 bo mạch chuẩn.',
+  },
+  {
+    id: 'ISS-202',
+    line: 'Line D5',
+    itemCode: 'D3 - Housing Alu-Pro',
+    title: 'Dừng tạm do thiếu 3 bộ vỏ nhôm Housing Alu-Pro',
+    description: 'Kho trung tâm DAALL đang điều chuyển bổ sung 3 bộ vỏ từ kho dự phòng NM1.',
+    severity: 'medium',
+    assignee: 'Vũ Đình Toàn',
+    assigneeRole: 'Line Leader Line D5',
+    duration: '1h 05m',
+    sinceTime: 'Từ 07:55',
+    statusText: 'Chờ cấp vật tư bổ sung',
+    progress: 35,
+    notes: 'Phiếu xuất kho bổ sung đã duyệt, dự kiến giao xuống Line D5 trong 20 phút.',
+  },
+];
+
+export const DAALL_AUDIT_LOGS: AuditLogEntry[] = [
+  {
+    version: 'v1.1 (Hiện tại)',
+    isCurrent: true,
+    timestamp: 'Hôm nay, 08:40',
+    author: 'Admin_DAALL',
+    reason: 'Cập nhật định mức khởi chạy cụm dây chuyền DAALL Q2',
+    changes: 'Khởi tạo D1-D4 và đồng bộ 5 dây chuyền Line D1 - D5',
+    tone: 'blue',
+  },
+  {
+    version: 'v1.0',
+    timestamp: 'Hôm nay, 08:00',
+    author: 'System_Init',
+    reason: 'Kích hoạt Trung tâm Điều hành Sản xuất DAALL',
+    changes: 'Tạo cấu trúc Trung tâm DAALL tương đương KHV',
+    tone: 'slate',
+  },
+];
+
+export function createInitialCenterData(payload: {
+  code: string;
+  name: string;
+  subtitle?: string;
+  accentColor: CenterAccentColor;
+  initialLineCount: number;
+}): ProductionCenter {
+  const cleanCode = payload.code.trim().toUpperCase();
+  const slug = cleanCode.toLowerCase().replace(/[^a-z0-9]+/g, '-') || `c-${Date.now()}`;
+  const today = getTodayIsoDate();
+  const count = Math.max(0, Math.min(10, payload.initialLineCount));
+  const lines: ProductionLine[] = Array.from({ length: count }, (_, idx) => {
+    const num = idx + 1;
+    const isMass = idx === 0;
+    const subnet = 40 + num;
+    return {
+      id: `${slug}-line-${num}-${Date.now()}`,
+      lineCode: `${cleanCode.slice(0, 3)}-${String(num).padStart(2, '0')}`,
+      name: `Line ${num}`,
+      stage: `Line ${num} - Công đoạn ${num}`,
+      shortStage: isMass ? 'Mass' : 'Setup',
+      factory: DEFAULT_FACTORIES[0],
+      characteristic: isMass ? 'mas' : 'new',
+      vtPercent: isMass ? 100 : 80,
+      healthPercent: isMass ? 90 : 75,
+      issueCount: 0,
+      statusLabel: isMass ? 'Đang sản xuất' : 'Đang Lắp Ráp',
+      healthBadge: isMass ? 'Ổn định' : 'Chờ kiểm tra',
+      healthTone: isMass ? 'emerald' : 'amber',
+      leader: 'Kỹ sư phụ trách',
+      updatedAt: formatLineTimestamp(),
+      keyMachines: createDefaultKeyMachines(`${slug}-line-${num}`, subnet),
+      setupTimeline: {
+        currentDate: today,
+        targetDate: addDaysToIso(today, isMass ? 0 : 3),
+        expectedDate: addDaysToIso(today, isMass ? 0 : 3),
+      },
+    };
+  });
+
+  const pipelineItems: PipelineItem[] = [
+    {
+      itemNo: 'M1',
+      name: `${cleanCode}-Item 1`,
+      badgeColor: 'blue',
+      targetDemand: 10,
+      toBuy: 10,
+      inWarehouse: 10,
+      vendorInbound: 10,
+      stagedOnLine: 8,
+      lineTested: 8,
+      purchaseIssue: '',
+      vendorIssue: '',
+    },
+    {
+      itemNo: 'M2',
+      name: `${cleanCode}-Item 2`,
+      badgeColor: 'indigo',
+      targetDemand: 12,
+      toBuy: 12,
+      inWarehouse: 10,
+      vendorInbound: 9,
+      stagedOnLine: 8,
+      lineTested: 7,
+      purchaseIssue: '',
+      vendorIssue: '',
+    },
+  ];
+
+  return {
+    id: `center-${slug}-${Date.now()}`,
+    code: cleanCode,
+    name: payload.name.trim(),
+    subtitle: payload.subtitle?.trim() || `Hub Vận Hành ${cleanCode}`,
+    accentColor: payload.accentColor,
+    selectedProject: `${cleanCode}-2025`,
+    lines,
+    pipelineItems,
+    issues: [],
+    auditLogs: [
+      {
+        version: 'v1.0 (Hiện tại)',
+        isCurrent: true,
+        timestamp: `Hôm nay, ${new Date().toLocaleTimeString('vi-VN', {
+          hour: '2-digit',
+          minute: '2-digit',
+        })}`,
+        author: `Admin_${cleanCode}`,
+        reason: `Admin khởi tạo Trung tâm mới: ${payload.name.trim()}`,
+        changes: `Tạo Trung tâm ${cleanCode} với ${count} dây chuyền ban đầu`,
+        tone: 'blue',
+      },
+    ],
+  };
+}
+
+export const INITIAL_CENTERS: ProductionCenter[] = [
+  {
+    id: 'center-khv',
+    code: 'KHV',
+    name: 'Trung tâm Kế hoạch Vận hành (KHV)',
+    subtitle: 'Hub Vận Hành',
+    accentColor: 'blue',
+    selectedProject: 'KHV-2025',
+    lines: INITIAL_LINES,
+    pipelineItems: INITIAL_PIPELINE_ITEMS,
+    issues: INITIAL_ISSUES,
+    auditLogs: INITIAL_AUDIT_LOGS,
+  },
+  {
+    id: 'center-daall',
+    code: 'DAALL',
+    name: 'Trung tâm Điều hành Sản xuất (DAALL)',
+    subtitle: 'Hub Vận Hành DAALL',
+    accentColor: 'indigo',
+    selectedProject: 'DAALL-2025',
+    lines: DAALL_LINES,
+    pipelineItems: DAALL_PIPELINE_ITEMS,
+    issues: DAALL_ISSUES,
+    auditLogs: DAALL_AUDIT_LOGS,
+  },
+];
+

@@ -15,6 +15,7 @@ import { IssueItem, ProductionLine } from '../../types/production';
 
 interface LineIssuesModalProps {
   isOpen: boolean;
+  centerCode?: string;
   targetLine: ProductionLine | null;
   isHubMode: boolean;
   issues: IssueItem[];
@@ -28,6 +29,7 @@ type IssueHistoryFilter = 'all' | 'open' | 'resolved';
 
 export function LineIssuesModal({
   isOpen,
+  centerCode = 'KHV',
   targetLine,
   isHubMode,
   issues,
@@ -61,7 +63,7 @@ export function LineIssuesModal({
   const lowCount = openIssues.filter((i) => i.severity === 'low').length;
 
   const titleText = isHubMode
-    ? 'Lịch Sử & Chi Tiết Issue Toàn Nhà Máy (KHV)'
+    ? `Lịch Sử & Chi Tiết Issue Toàn Trung Tâm (${centerCode})`
     : `Lịch Sử & Chi Tiết Issue — ${targetLine?.name || ''}`;
 
   const subText = isHubMode

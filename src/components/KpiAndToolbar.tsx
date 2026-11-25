@@ -21,6 +21,7 @@ interface KpiAndToolbarProps {
   onOpenVendorField: () => void;
   onDownloadTemplates: () => void;
   onOpenAlertModal: () => void;
+  onOpenSupplyChainScreen?: () => void;
 }
 
 export function KpiAndToolbar({
@@ -32,6 +33,7 @@ export function KpiAndToolbar({
   onOpenVendorField,
   onDownloadTemplates,
   onOpenAlertModal,
+  onOpenSupplyChainScreen,
 }: KpiAndToolbarProps) {
   const avgProgress =
     lines.length > 0
@@ -180,9 +182,19 @@ export function KpiAndToolbar({
         <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-semibold text-slate-500">Hoàn thành mục tiêu chặng</span>
-            <span className="p-1.5 rounded-md bg-indigo-50 text-indigo-600">
-              <ClipboardList className="w-4 h-4" />
-            </span>
+            {onOpenSupplyChainScreen ? (
+              <button
+                type="button"
+                onClick={onOpenSupplyChainScreen}
+                className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer"
+              >
+                Mở màn hình Chuỗi cung ứng →
+              </button>
+            ) : (
+              <span className="p-1.5 rounded-md bg-indigo-50 text-indigo-600">
+                <ClipboardList className="w-4 h-4" />
+              </span>
+            )}
           </div>
           <div className="flex items-baseline justify-between gap-2">
             <span className="text-2xl font-bold text-slate-900 tabular-nums">
