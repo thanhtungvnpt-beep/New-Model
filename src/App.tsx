@@ -15,6 +15,8 @@ import {
   ExportIssuesModal,
   IssueDetailModal,
 } from './components/modals/GovernanceModals';
+import { LineEdmModal } from './components/modals/LineEdmModal';
+import { LineImprovementModal } from './components/modals/LineImprovementModal';
 import { LineIssuesModal } from './components/modals/LineIssuesModal';
 import { LineQuickReportModal } from './components/modals/LineQuickReportModal';
 import {
@@ -39,7 +41,11 @@ import {
   isMassStopIssueStatus,
   IssueItem,
   IssueSeverity,
+  LineEdmWorstItem,
   LineHealthStatus,
+  LineImprovementPost,
+  LineProcessTaskStatus,
+  LineQuickReportFocus,
   LineTransferHistoryEntry,
   OperationTab,
   PipelineItem,
@@ -104,7 +110,7 @@ export default function App() {
   const [activeScreen, setActiveScreen] = useState<AppScreen>('overview');
 
   const [isAdminMode, setIsAdminMode] = useState(false);
-  const [adminAuthIntent, setAdminAuthIntent] = useState<'demand' | 'line' | 'center'>('demand');
+  const [adminAuthIntent, setAdminAuthIntent] = useState<'demand' | 'line' | 'center' | 'edm'>('demand');
   const [lastAdminReason, setLastAdminReason] = useState('');
 
   // Modals state
@@ -122,6 +128,9 @@ export default function App() {
   const [centerManagerOpen, setCenterManagerOpen] = useState(false);
   const [editingIssueId, setEditingIssueId] = useState<string | null>(null);
   const [quickReportLineId, setQuickReportLineId] = useState<string | null>(null);
+  const [quickReportFocus, setQuickReportFocus] = useState<LineQuickReportFocus>('general');
+  const [improvementModalLineId, setImprovementModalLineId] = useState<string | null>(null);
+  const [edmModalLineId, setEdmModalLineId] = useState<string | null>(null);
   const [inspectIssuesTarget, setInspectIssuesTarget] = useState<string | null>(null);
 
   // Toast notifications
@@ -815,6 +824,8 @@ export default function App() {
     setActiveCenterId(centerId);
     setSelectedLineFilter('all');
     setQuickReportLineId(null);
+    setImprovementModalLineId(null);
+    setEdmModalLineId(null);
     setInspectIssuesTarget(null);
     setEditingIssueId(null);
     pushToast(
@@ -852,12 +863,76 @@ export default function App() {
       setActiveCenterId(remaining[0].id);
       setSelectedLineFilter('all');
       setQuickReportLineId(null);
+      setImprovementModalLineId(null);
+      setEdmModalLineId(null);
       setInspectIssuesTarget(null);
       setEditingIssueId(null);
     }
     pushToast(
       `Đã xóa Trung tâm ${target.code}`,
       `${target.name} đã được gỡ bỏ khỏi hệ thống quản trị.`,
+      'amber'
+    );
+  };
+
+  const handleSaveLineImprovement = (
+    lineId: string,
+    posts: LineImprovementPost[],
+    summaryStatus: LineProcessTaskStatus,
+    latestNote?: string
+  ) => {
+    const targetLine = lines.find((l) => l.id === lineId);
+    setLines((prev) =>
+      prev.map((l) =>
+        l.id === lineId
+          ? {
+              ...l,
+              updatedAt: formatLineTimestamp(),
+              improvement: {
+                status: summaryStatus,
+                count: posts.length,
+                note: latestNote,
+                updatedAt: formatLineTimestamp(),
+                posts,
+              },
+            }
+          : l
+      )
+    );
+    pushToast(
+      `Đã cập nhật Cải Tiến (${targetLine?.name || lineId})`,
+      `Hiện có ${posts.length} bài cải tiến trong lịch sử (${summaryStatus}).`,
+      'emerald'
+    );
+  };
+
+  const handleSaveLineEdm = (
+    lineId: string,
+    worstItems: LineEdmWorstItem[],
+    summaryStatus: LineProcessTaskStatus,
+    latestNote?: string
+  ) => {
+    const targetLine = lines.find((l) => l.id === lineId);
+    setLines((prev) =>
+      prev.map((l) =>
+        l.id === lineId
+          ? {
+              ...l,
+              updatedAt: formatLineTimestamp(),
+              edm: {
+                status: summaryStatus,
+                count: worstItems.length,
+                note: latestNote,
+                updatedAt: formatLineTimestamp(),
+                worstItems,
+              },
+            }
+          : l
+      )
+    );
+    pushToast(
+      `Đã cập nhật EDM (${targetLine?.name || lineId})`,
+      `Hiện có ${worstItems.length} mục Worst tuần (${summaryStatus}).`,
       'amber'
     );
   };
@@ -939,10 +1014,14 @@ export default function App() {
               lines={lines}
               selectedLineFilter={selectedLineFilter}
               isAdminMode={isAdminMode}
-              onQuickReportLine={(lineId) => setQuickReportLineId(lineId)}
+              onQuickReportLine={(lineId) => {
+                setQuickReportFocus('general');
+                setQuickReportLineId(lineId);
+              }}
               onInspectLineIssues={(target) => setInspectIssuesTarget(target)}
               onAdminEditLine={() => {
                 if (isAdminMode) {
+                  setQuickReportFocus('general');
                   setQuickReportLineId(lines[0]?.id || null);
                 } else {
                   setAdminAuthIntent('line');
@@ -952,6 +1031,16 @@ export default function App() {
               onClearLineFilter={() => setSelectedLineFilter('all')}
               onOpenAddLine={() => setAddLineOpen(true)}
               onReorderLines={handleReorderLines}
+              onOpenLineFunction={(lineId, fn) => {
+                if (fn === 'improvement') {
+                  setImprovementModalLineId(lineId);
+                } else if (fn === 'edm') {
+                  setEdmModalLineId(lineId);
+                } else {
+                  setQuickReportFocus(fn);
+                  setQuickReportLineId(lineId);
+                }
+              }}
             />
 
             <TargetDemandSpecs
@@ -1107,13 +1196,17 @@ export default function App() {
         activeCenter={activeCenter}
         lines={lines}
         initialLineId={quickReportLineId}
+        initialFocusSection={quickReportFocus}
         isAdminMode={isAdminMode}
         onRequestAdminAuth={() => {
           setAdminAuthIntent('line');
           setAdminAuthOpen(true);
         }}
         onExitAdminMode={() => setIsAdminMode(false)}
-        onClose={() => setQuickReportLineId(null)}
+        onClose={() => {
+          setQuickReportLineId(null);
+          setQuickReportFocus('general');
+        }}
         onSaveLineReport={handleSaveLineQuickReport}
         onTransferLineFactory={handleTransferLineFactory}
         onDeleteLine={handleDeleteLine}
@@ -1124,6 +1217,31 @@ export default function App() {
           pushToast('Lọc theo dây chuyền', `Đang hiển thị sự cố của ${lineName}.`, 'blue');
         }}
         onInspectLineIssues={(lineId) => setInspectIssuesTarget(lineId)}
+        onOpenImprovementPortal={(lineId) => setImprovementModalLineId(lineId)}
+        onOpenEdmPortal={(lineId) => setEdmModalLineId(lineId)}
+      />
+
+      <LineImprovementModal
+        isOpen={improvementModalLineId !== null}
+        activeCenter={activeCenter}
+        lines={lines}
+        initialLineId={improvementModalLineId}
+        onClose={() => setImprovementModalLineId(null)}
+        onSaveLineImprovement={handleSaveLineImprovement}
+      />
+
+      <LineEdmModal
+        isOpen={edmModalLineId !== null}
+        activeCenter={activeCenter}
+        lines={lines}
+        initialLineId={edmModalLineId}
+        isAdminMode={isAdminMode}
+        onRequestAdminAuth={() => {
+          setAdminAuthIntent('edm');
+          setAdminAuthOpen(true);
+        }}
+        onClose={() => setEdmModalLineId(null)}
+        onSaveLineEdm={handleSaveLineEdm}
       />
 
       <LineIssuesModal
@@ -1216,6 +1334,12 @@ export default function App() {
             pushToast(
               'Xác thực Admin thành công',
               'Đã mở khóa chức năng thêm / bớt Trung tâm sản xuất.',
+              'blue'
+            );
+          } else if (adminAuthIntent === 'edm') {
+            pushToast(
+              'Xác thực Admin thành công',
+              'Đã mở khóa quyền Admin để post Worst theo từng tuần cho các máy trên EDM.',
               'blue'
             );
           } else {

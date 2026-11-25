@@ -20,7 +20,9 @@ import {
   Trash2,
   Truck,
   UserCheck,
+  Wrench,
   X,
+  Zap,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import {
@@ -42,6 +44,8 @@ import {
   LineCharacteristic,
   LineHealthStatus,
   LineKeyMachine,
+  LineProcessTaskStatus,
+  LineQuickReportFocus,
   LineTransferHistoryEntry,
   MASS_LINE_STATUSES,
   NEW_LINE_STATUSES,
@@ -56,6 +60,7 @@ interface LineQuickReportModalProps {
   activeCenter: ProductionCenter;
   lines: ProductionLine[];
   initialLineId: string | null;
+  initialFocusSection?: LineQuickReportFocus;
   isAdminMode: boolean;
   onRequestAdminAuth: () => void;
   onExitAdminMode: () => void;
@@ -84,6 +89,8 @@ interface LineQuickReportModalProps {
   onDeleteLine: (lineId: string) => void;
   onFilterLineIssues: (lineName: string) => void;
   onInspectLineIssues: (lineId: string) => void;
+  onOpenImprovementPortal?: (lineId: string) => void;
+  onOpenEdmPortal?: (lineId: string) => void;
 }
 
 export function LineQuickReportModal({
@@ -92,6 +99,7 @@ export function LineQuickReportModal({
   activeCenter,
   lines,
   initialLineId,
+  initialFocusSection = 'general',
   isAdminMode,
   onRequestAdminAuth,
   onExitAdminMode,
@@ -101,6 +109,8 @@ export function LineQuickReportModal({
   onDeleteLine,
   onFilterLineIssues,
   onInspectLineIssues,
+  onOpenImprovementPortal,
+  onOpenEdmPortal,
 }: LineQuickReportModalProps) {
   const [selectedId, setSelectedId] = useState<string>(initialLineId || lines[0]?.id || '');
 
@@ -155,6 +165,12 @@ export function LineQuickReportModal({
   const [issueValidationError, setIssueValidationError] = useState('');
   const [syncLeaderToIssues, setSyncLeaderToIssues] = useState(true);
   const [keyMachines, setKeyMachines] = useState<LineKeyMachine[]>([]);
+  const [impStatus, setImpStatus] = useState<LineProcessTaskStatus>('Chưa phát sinh');
+  const [impCount, setImpCount] = useState(0);
+  const [impNote, setImpNote] = useState('');
+  const [edmStatus, setEdmStatus] = useState<LineProcessTaskStatus>('Chưa phát sinh');
+  const [edmCount, setEdmCount] = useState(0);
+  const [edmNote, setEdmNote] = useState('');
 
   const getLineSubnet = (target: Pick<ProductionLine, 'id' | 'name'>): number => {
     const match = /(\d+)/.exec(target.name) || /(\d+)/.exec(target.id);
@@ -254,6 +270,12 @@ export function LineQuickReportModal({
         ? target.keyMachines.map((m) => ({ ...m }))
         : createDefaultKeyMachines(target.id, getLineSubnet(target));
     setKeyMachines(initialMachines);
+    setImpStatus(target.improvement?.status ?? 'Chưa phát sinh');
+    setImpCount(target.improvement?.count ?? 0);
+    setImpNote(target.improvement?.note ?? '');
+    setEdmStatus(target.edm?.status ?? 'Chưa phát sinh');
+    setEdmCount(target.edm?.count ?? 0);
+    setEdmNote(target.edm?.note ?? '');
   };
 
   const getMassStopSeverity = (status: LineHealthStatus): IssueSeverity =>
@@ -377,7 +399,14 @@ export function LineQuickReportModal({
     if (!isOpen) return;
     const target = lines.find((l) => l.id === (initialLineId || selectedId)) || lines[0];
     if (target) loadLineIntoState(target);
-  }, [isOpen, initialLineId]);
+    if (initialFocusSection === 'improvement' || initialFocusSection === 'edm') {
+      const timer = window.setTimeout(() => {
+        const panel = document.getElementById('line-subfunctions-panel');
+        panel?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 80);
+      return () => window.clearTimeout(timer);
+    }
+  }, [isOpen, initialLineId, initialFocusSection]);
 
   useEffect(() => {
     if (isAdminMode) {
@@ -510,6 +539,20 @@ export function LineQuickReportModal({
           note: m.note?.trim() || undefined,
         }))
         .filter((m) => m.name.length > 0),
+      improvement: {
+        status: impStatus,
+        count: Math.max(0, impCount),
+        note: impNote.trim() || undefined,
+        updatedAt: formatLineTimestamp(),
+        posts: activeLine.improvement?.posts,
+      },
+      edm: {
+        status: edmStatus,
+        count: Math.max(0, edmCount),
+        note: edmNote.trim() || undefined,
+        updatedAt: formatLineTimestamp(),
+        worstItems: activeLine.edm?.worstItems,
+      },
       setupTimeline: {
         currentDate: setupCurrentDate || getTodayIsoDate(),
         targetDate: setupTargetDate || addDaysToIso(getTodayIsoDate(), 3),
@@ -1415,6 +1458,226 @@ export function LineQuickReportModal({
             );
           })()}
 
+          {/* Line Functions: Cải Tiến & EDM */}
+          <div
+            id="line-subfunctions-panel"
+            className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-3"
+          >
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="font-bold text-slate-900 inline-flex items-center gap-1.5">
+                <Wrench className="w-4 h-4 text-indigo-600" />
+                <span>Chức Năng Cải Tiến &amp; EDM Trên Thẻ Line</span>
+              </span>
+              <span className="text-[11px] text-slate-500">
+                Cập nhật trực tiếp tiến độ Cải Tiến và gia công EDM cho {lineName || activeLine.name}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {/* Cải Tiến Card */}
+              <div
+                className={`rounded-xl border-2 p-3.5 bg-white space-y-2.5 transition ${
+                  initialFocusSection === 'improvement'
+                    ? 'border-indigo-500 ring-2 ring-indigo-200'
+                    : 'border-indigo-200'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-6 h-6 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+                      <Wrench className="w-3.5 h-3.5" />
+                    </span>
+                    <div>
+                      <span className="font-bold text-slate-900 block">Chức năng Cải Tiến</span>
+                      <span className="text-[10px] text-slate-500">Kaizen · Hiệu chỉnh JIG / Cycle time</span>
+                    </div>
+                  </div>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      impStatus === 'Hoàn tất'
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : impStatus === 'Đang thực hiện'
+                        ? 'bg-indigo-100 text-indigo-800'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    {impStatus}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="block">
+                    <span className="text-[10.5px] font-semibold text-slate-600 block mb-1">
+                      Trạng thái Cải Tiến
+                    </span>
+                    <select
+                      value={impStatus}
+                      onChange={(e) => {
+                        const next = e.target.value as LineProcessTaskStatus;
+                        setImpStatus(next);
+                        if (next !== 'Chưa phát sinh' && impCount === 0) setImpCount(1);
+                        if (next === 'Chưa phát sinh') setImpCount(0);
+                      }}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800"
+                    >
+                      <option value="Chưa phát sinh">Chưa phát sinh</option>
+                      <option value="Đang thực hiện">Đang thực hiện</option>
+                      <option value="Hoàn tất">Hoàn tất</option>
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="text-[10.5px] font-semibold text-slate-600 block mb-1">
+                      Số hạng mục
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={impCount}
+                      onChange={(e) => {
+                        const val = Math.max(0, Number(e.target.value) || 0);
+                        setImpCount(val);
+                        if (val > 0 && impStatus === 'Chưa phát sinh') {
+                          setImpStatus('Đang thực hiện');
+                        }
+                      }}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-bold text-indigo-700 tabular-nums"
+                    />
+                  </label>
+                </div>
+
+                <label className="block">
+                  <span className="text-[10.5px] font-semibold text-slate-600 block mb-1">
+                    Nội dung Cải Tiến
+                  </span>
+                  <input
+                    type="text"
+                    value={impNote}
+                    onChange={(e) => setImpNote(e.target.value)}
+                    placeholder="VD: Cải tiến gá kẹp phôi CNC, tối ưu JIG..."
+                    className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800"
+                  />
+                </label>
+
+                {onOpenImprovementPortal && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenImprovementPortal(activeLine.id);
+                    }}
+                    className="w-full py-1.5 px-3 rounded-lg bg-indigo-50 hover:bg-indigo-600 text-indigo-700 hover:text-white border border-indigo-300 text-[11px] font-bold transition cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <Wrench className="w-3.5 h-3.5" />
+                    <span>
+                      Mở Cổng Post Cải Tiến &amp; Lịch Sử ({activeLine.improvement?.posts?.length ?? 0} bài)
+                    </span>
+                  </button>
+                )}
+              </div>
+
+              {/* EDM Card */}
+              <div
+                className={`rounded-xl border-2 p-3.5 bg-white space-y-2.5 transition ${
+                  initialFocusSection === 'edm'
+                    ? 'border-amber-500 ring-2 ring-amber-200'
+                    : 'border-amber-200'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-6 h-6 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                      <Zap className="w-3.5 h-3.5" />
+                    </span>
+                    <div>
+                      <span className="font-bold text-slate-900 block">Chức năng EDM</span>
+                      <span className="text-[10px] text-slate-500">Gia công xung điện · Điện cực / Khuôn</span>
+                    </div>
+                  </div>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      edmStatus === 'Hoàn tất'
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : edmStatus === 'Đang thực hiện'
+                        ? 'bg-amber-100 text-amber-800'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    {edmStatus}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="block">
+                    <span className="text-[10.5px] font-semibold text-slate-600 block mb-1">
+                      Trạng thái EDM
+                    </span>
+                    <select
+                      value={edmStatus}
+                      onChange={(e) => {
+                        const next = e.target.value as LineProcessTaskStatus;
+                        setEdmStatus(next);
+                        if (next !== 'Chưa phát sinh' && edmCount === 0) setEdmCount(1);
+                        if (next === 'Chưa phát sinh') setEdmCount(0);
+                      }}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800"
+                    >
+                      <option value="Chưa phát sinh">Chưa phát sinh</option>
+                      <option value="Đang thực hiện">Đang thực hiện</option>
+                      <option value="Hoàn tất">Hoàn tất</option>
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="text-[10.5px] font-semibold text-slate-600 block mb-1">
+                      Số chi tiết EDM
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={edmCount}
+                      onChange={(e) => {
+                        const val = Math.max(0, Number(e.target.value) || 0);
+                        setEdmCount(val);
+                        if (val > 0 && edmStatus === 'Chưa phát sinh') {
+                          setEdmStatus('Đang thực hiện');
+                        }
+                      }}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-bold text-amber-700 tabular-nums"
+                    />
+                  </label>
+                </div>
+
+                <label className="block">
+                  <span className="text-[10.5px] font-semibold text-slate-600 block mb-1">
+                    Nội dung gia công EDM
+                  </span>
+                  <input
+                    type="text"
+                    value={edmNote}
+                    onChange={(e) => setEdmNote(e.target.value)}
+                    placeholder="VD: Gia công EDM điện cực khuôn, chốt dẫn hướng..."
+                    className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-800"
+                  />
+                </label>
+
+                {onOpenEdmPortal && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenEdmPortal(activeLine.id);
+                    }}
+                    className="w-full py-1.5 px-3 rounded-lg bg-amber-50 hover:bg-amber-600 text-amber-800 hover:text-white border border-amber-300 text-[11px] font-bold transition cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <Zap className="w-3.5 h-3.5" />
+                    <span>
+                      Mở Bảng EDM Worst Tuần &amp; Đối Sách KTV ({activeLine.edm?.worstItems?.length ?? 0} Worst)
+                    </span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* 1. Material Progress & Line Health */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-3">
@@ -1849,6 +2112,20 @@ export function LineQuickReportModal({
                     note: m.note?.trim() || undefined,
                   }))
                   .filter((m) => m.name.length > 0),
+                improvement: {
+                  status: impStatus,
+                  count: Math.max(0, impCount),
+                  note: impNote.trim() || undefined,
+                  updatedAt: formatLineTimestamp(),
+                  posts: activeLine.improvement?.posts,
+                },
+                edm: {
+                  status: edmStatus,
+                  count: Math.max(0, edmCount),
+                  note: edmNote.trim() || undefined,
+                  updatedAt: formatLineTimestamp(),
+                  worstItems: activeLine.edm?.worstItems,
+                },
                 setupTimeline: {
                   currentDate: setupCurrentDate || getTodayIsoDate(),
                   targetDate: setupTargetDate || addDaysToIso(getTodayIsoDate(), 3),

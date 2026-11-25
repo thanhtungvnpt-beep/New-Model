@@ -110,6 +110,68 @@ export interface LineTransferHistoryEntry {
   };
 }
 
+export type LineProcessTaskStatus = 'Chưa phát sinh' | 'Đang thực hiện' | 'Hoàn tất';
+
+export interface LineImprovementAttachment {
+  fileName: string;
+  fileSizeBytes: number;
+  fileType?: string;
+  objectUrl?: string;
+  uploadedAt: string;
+}
+
+export interface LineImprovementPost {
+  id: string;
+  title: string;
+  beforeText: string;
+  afterText: string;
+  effectiveness: string;
+  author: string;
+  status: 'Đang thực hiện' | 'Hoàn tất';
+  createdAt: string;
+  pptAttachment?: LineImprovementAttachment;
+}
+
+export type LineEdmWorstStatus =
+  | 'Chờ đối sách'
+  | 'Đang triển khai đối sách'
+  | 'Đã hoàn tất đối sách';
+
+export type LineEdmWorstPriority = 'Cao (Top 1)' | 'Trung bình' | 'Theo dõi';
+
+export interface LineEdmCountermeasure {
+  technicianName: string;
+  actionText: string;
+  resultNote?: string;
+  updatedAt: string;
+}
+
+export interface LineEdmWorstItem {
+  id: string;
+  weekLabel: string; // VD: Tuần 47 / 2026
+  machineName: string; // VD: Máy A, Máy B, Máy C
+  machineIp?: string;
+  worstTitle: string;
+  worstDetail: string;
+  metricValue?: string; // VD: 4.2% NG hoặc 12 lần dừng
+  priority: LineEdmWorstPriority;
+  postedByAdmin: string;
+  createdAt: string;
+  status: LineEdmWorstStatus;
+  countermeasure?: LineEdmCountermeasure;
+}
+
+export interface LineSubProcessTask {
+  status: LineProcessTaskStatus;
+  count: number;
+  note?: string;
+  updatedAt?: string;
+  posts?: LineImprovementPost[];
+  worstItems?: LineEdmWorstItem[];
+}
+
+export type LineQuickReportFocus = 'general' | 'improvement' | 'edm';
+
 export interface ProductionLine {
   id: string;
   lineCode?: string;
@@ -131,6 +193,8 @@ export interface ProductionLine {
   updatedAt?: string;
   keyMachines?: LineKeyMachine[];
   setupTimeline?: LineSetupTimeline;
+  improvement?: LineSubProcessTask;
+  edm?: LineSubProcessTask;
 }
 
 export interface PipelineItem {

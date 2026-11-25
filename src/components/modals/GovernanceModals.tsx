@@ -1019,6 +1019,8 @@ export function AddLineModal({
               leader,
               updatedAt: formatLineTimestamp(),
               keyMachines: createDefaultKeyMachines(`line-${nextLineNumber}`, nextLineNumber),
+              improvement: { status: 'Chưa phát sinh', count: 0 },
+              edm: { status: 'Chưa phát sinh', count: 0 },
             });
             onClose();
           }}

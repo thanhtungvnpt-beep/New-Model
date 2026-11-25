@@ -12,6 +12,8 @@ import {
   PlusCircle,
   Truck,
   UserCheck,
+  Wrench,
+  Zap,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import {
@@ -38,6 +40,7 @@ interface LineNetworkDiagramProps {
   onClearLineFilter: () => void;
   onOpenAddLine: () => void;
   onReorderLines: (fromLineId: string, toLineId: string) => void;
+  onOpenLineFunction: (lineId: string, fn: 'improvement' | 'edm') => void;
 }
 
 const HUB_CIRCLE_GRADIENT = {
@@ -65,6 +68,7 @@ export function LineNetworkDiagram({
   onClearLineFilter,
   onOpenAddLine,
   onReorderLines,
+  onOpenLineFunction,
 }: LineNetworkDiagramProps) {
   const [selectedFactory, setSelectedFactory] = useState<string>('all');
   const [draggingLineId, setDraggingLineId] = useState<string | null>(null);
@@ -90,6 +94,14 @@ export function LineNetworkDiagram({
       : 0;
   const avgVt = avgVtNum.toFixed(1);
   const totalLineIssues = visibleLines.reduce((acc, l) => acc + l.issueCount, 0);
+  const totalImprovements = visibleLines.reduce(
+    (acc, l) => acc + (l.improvement?.posts ? l.improvement.posts.length : l.improvement?.count ?? 0),
+    0
+  );
+  const totalEdms = visibleLines.reduce(
+    (acc, l) => acc + (l.edm?.worstItems ? l.edm.worstItems.length : l.edm?.count ?? 0),
+    0
+  );
 
   const firstRow = visibleLines.slice(0, 5);
   const remainingRows = visibleLines.slice(5);
@@ -432,6 +444,83 @@ export function LineNetworkDiagram({
                   {machines.length > 0 ? `${machines.length} máy: ${machineNames}` : 'Chưa gán máy'}
                 </span>
               </span>
+            );
+          })()}
+          {(() => {
+            const imp = line.improvement ?? { status: 'Chưa phát sinh', count: 0 };
+            const impDisplayCount = imp.posts ? imp.posts.length : imp.count;
+            const edm = line.edm ?? { status: 'Chưa phát sinh', count: 0 };
+            const edmDisplayCount = edm.worstItems ? edm.worstItems.length : edm.count;
+
+            const impBtnClass =
+              imp.status === 'Hoàn tất'
+                ? 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100'
+                : imp.status === 'Đang thực hiện' || impDisplayCount > 0
+                ? 'bg-indigo-50 border-indigo-300 text-indigo-800 hover:bg-indigo-100'
+                : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-700';
+
+            const impBadgeClass =
+              imp.status === 'Hoàn tất'
+                ? 'bg-emerald-600 text-white'
+                : imp.status === 'Đang thực hiện' || impDisplayCount > 0
+                ? 'bg-indigo-600 text-white'
+                : 'bg-slate-200 text-slate-600';
+
+            const edmBtnClass =
+              edm.status === 'Hoàn tất'
+                ? 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100'
+                : edm.status === 'Đang thực hiện' || edmDisplayCount > 0
+                ? 'bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100'
+                : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-amber-50 hover:border-amber-300 hover:text-amber-700';
+
+            const edmBadgeClass =
+              edm.status === 'Hoàn tất'
+                ? 'bg-emerald-600 text-white'
+                : edm.status === 'Đang thực hiện' || edmDisplayCount > 0
+                ? 'bg-amber-500 text-white'
+                : 'bg-slate-200 text-slate-600';
+
+            return (
+              <div className="mt-1.5 w-full grid grid-cols-2 gap-1">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenLineFunction(line.id, 'improvement');
+                  }}
+                  title={`Cải Tiến (${line.name}): ${imp.status} · ${impDisplayCount} bài — Nhấp để post Trước/Sau/Hiệu quả, upload PowerPoint & xem lịch sử`}
+                  className={`px-1.5 py-1 rounded-md border text-[9px] font-bold flex items-center justify-between gap-1 transition cursor-pointer focus-visible:outline-2 focus-visible:outline-indigo-600 ${impBtnClass}`}
+                >
+                  <span className="inline-flex items-center gap-0.5 min-w-0">
+                    <Wrench className="w-2.5 h-2.5 shrink-0" />
+                    <span className="truncate">Cải Tiến</span>
+                  </span>
+                  <span
+                    className={`px-1 rounded text-[8.5px] font-extrabold tabular-nums leading-tight shrink-0 ${impBadgeClass}`}
+                  >
+                    {impDisplayCount}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenLineFunction(line.id, 'edm');
+                  }}
+                  title={`EDM (${line.name}): ${edm.status} · ${edmDisplayCount} Worst tuần — Nhấp để Admin post Worst theo tuần/máy & KTV post đối sách`}
+                  className={`px-1.5 py-1 rounded-md border text-[9px] font-bold flex items-center justify-between gap-1 transition cursor-pointer focus-visible:outline-2 focus-visible:outline-amber-600 ${edmBtnClass}`}
+                >
+                  <span className="inline-flex items-center gap-0.5 min-w-0">
+                    <Zap className="w-2.5 h-2.5 shrink-0" />
+                    <span className="truncate">EDM</span>
+                  </span>
+                  <span
+                    className={`px-1 rounded text-[8.5px] font-extrabold tabular-nums leading-tight shrink-0 ${edmBadgeClass}`}
+                  >
+                    {edmDisplayCount}
+                  </span>
+                </button>
+              </div>
             );
           })()}
           {(() => {
@@ -847,11 +936,21 @@ export function LineNetworkDiagram({
                   {activeCenter.subtitle}
                 </span>
               </button>
-              <div className="mt-2.5 text-center">
-                <span className="text-xs text-slate-600 font-semibold">
+              <div className="mt-2.5 text-center space-y-1">
+                <span className="text-xs text-slate-600 font-semibold block">
                   {visibleLines.length} line{' '}
                   {selectedFactory !== 'all' ? `· ${getShortFactoryLabel(selectedFactory)}` : 'On3'}
                 </span>
+                <div className="flex items-center justify-center gap-1.5 text-[10px] font-bold tabular-nums">
+                  <span className="px-1.5 py-0.5 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 inline-flex items-center gap-0.5">
+                    <Wrench className="w-2.5 h-2.5" />
+                    <span>Cải Tiến: {totalImprovements}</span>
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-800 inline-flex items-center gap-0.5">
+                    <Zap className="w-2.5 h-2.5" />
+                    <span>EDM: {totalEdms}</span>
+                  </span>
+                </div>
               </div>
             </div>
 
