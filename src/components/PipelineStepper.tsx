@@ -217,7 +217,9 @@ export function PipelineStepper({
           </div>
           <div className="flex flex-col items-center">
             <span className="font-bold text-blue-900">3. Đã có kho</span>
-            <span className="text-[10px] text-slate-400 font-normal">In-Stock Warehouse</span>
+            <span className="text-[10px] text-slate-400 font-normal">
+              Kho · Cải Tiến &amp; EDM
+            </span>
           </div>
           <div className="flex flex-col items-center">
             <span className="font-bold text-blue-900">4. Nhập Vendor</span>
@@ -351,6 +353,20 @@ export function PipelineStepper({
                         >
                           Về kho {item.inWarehouse}
                         </span>
+                        <div className="mt-1 flex items-center justify-center gap-1 flex-wrap">
+                          <span
+                            title="Số lượng đang xử lý Cải Tiến tại kho"
+                            className="px-1.5 py-0.5 rounded bg-amber-50 border border-amber-200 text-[9px] font-bold text-amber-800 tabular-nums whitespace-nowrap"
+                          >
+                            Cải Tiến: {item.warehouseImprovement ?? 0}
+                          </span>
+                          <span
+                            title="Số lượng đang gia công EDM tại kho"
+                            className="px-1.5 py-0.5 rounded bg-cyan-50 border border-cyan-200 text-[9px] font-bold text-cyan-800 tabular-nums whitespace-nowrap"
+                          >
+                            EDM: {item.warehouseEdm ?? 0}
+                          </span>
+                        </div>
                       </div>
 
                       {/* 4. Nhập Vendor */}

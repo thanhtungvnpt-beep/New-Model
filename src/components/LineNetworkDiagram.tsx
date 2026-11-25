@@ -6,6 +6,7 @@ import {
   ClipboardEdit,
   Clock,
   Cpu,
+  GripVertical,
   Lock,
   LockOpen,
   PlusCircle,
@@ -36,6 +37,7 @@ interface LineNetworkDiagramProps {
   onAdminEditLine: () => void;
   onClearLineFilter: () => void;
   onOpenAddLine: () => void;
+  onReorderLines: (fromLineId: string, toLineId: string) => void;
 }
 
 const HUB_CIRCLE_GRADIENT = {
@@ -62,11 +64,16 @@ export function LineNetworkDiagram({
   onAdminEditLine,
   onClearLineFilter,
   onOpenAddLine,
+  onReorderLines,
 }: LineNetworkDiagramProps) {
   const [selectedFactory, setSelectedFactory] = useState<string>('all');
+  const [draggingLineId, setDraggingLineId] = useState<string | null>(null);
+  const [dragOverLineId, setDragOverLineId] = useState<string | null>(null);
 
   useEffect(() => {
     setSelectedFactory('all');
+    setDraggingLineId(null);
+    setDragOverLineId(null);
   }, [activeCenter.code]);
 
   const factoryOptions = Array.from(
@@ -232,6 +239,8 @@ export function LineNetworkDiagram({
 
   const renderLineNode = (line: ProductionLine) => {
     const isSelected = selectedLineFilter === line.name;
+    const isDragging = draggingLineId === line.id;
+    const isDragOver = dragOverLineId === line.id && draggingLineId !== line.id;
     const theme = getLineTheme(line);
     const vtTheme = getVtBadgeTheme(line.vtPercent);
     const issueTheme = getIssueBadgeTheme(line.issueCount);
@@ -239,6 +248,37 @@ export function LineNetworkDiagram({
     return (
       <div
         key={line.id}
+        draggable
+        onDragStart={(e) => {
+          setDraggingLineId(line.id);
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', line.id);
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          if (draggingLineId && draggingLineId !== line.id) {
+            setDragOverLineId(line.id);
+          }
+        }}
+        onDragLeave={() => {
+          if (dragOverLineId === line.id) {
+            setDragOverLineId(null);
+          }
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          const sourceId = draggingLineId || e.dataTransfer.getData('text/plain');
+          if (sourceId && sourceId !== line.id) {
+            onReorderLines(sourceId, line.id);
+          }
+          setDraggingLineId(null);
+          setDragOverLineId(null);
+        }}
+        onDragEnd={() => {
+          setDraggingLineId(null);
+          setDragOverLineId(null);
+        }}
         role="button"
         tabIndex={0}
         onClick={() => onQuickReportLine(line.id)}
@@ -248,37 +288,49 @@ export function LineNetworkDiagram({
             onQuickReportLine(line.id);
           }
         }}
-        className={`group relative z-10 flex flex-col items-center px-2.5 pt-7 pb-3 rounded-2xl border-2 transition-all duration-200 cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-600 ${
+        className={`group relative z-10 flex flex-col items-center px-2.5 pt-7 pb-3 rounded-2xl border-2 transition-all duration-200 cursor-grab active:cursor-grabbing focus-visible:outline-2 focus-visible:outline-blue-600 ${
           theme.cardFrame
         } ${
-          isSelected
+          isDragging
+            ? 'opacity-50 scale-[0.97] ring-2 ring-blue-400'
+            : isDragOver
+            ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-white bg-blue-50/40 scale-[1.03]'
+            : isSelected
             ? 'ring-2 ring-blue-600 ring-offset-2 ring-offset-white scale-[1.03]'
             : 'hover:-translate-y-0.5'
         }`}
-        title={`${line.stage} (${line.healthBadge}) — Nhấp thẻ để báo cáo nhanh, hoặc nhấp vào ô Issue để xem chi tiết vấn đề`}
+        title={`${line.stage} (${line.healthBadge}) — Nhấp thẻ để xem/cập nhật, hoặc kéo thả để đổi vị trí thẻ Line`}
       >
         <div className="absolute top-1.5 left-1.5 right-1.5 z-30 flex items-center justify-between gap-1">
-          <span
-            title={
-              line.characteristic === 'new'
-                ? 'Đặc tính Line: New — Line đang test thử model mới'
-                : 'Đặc tính Line: Mass — Đã đi vào sản xuất hàng loạt'
-            }
-            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[9px] font-extrabold leading-none whitespace-nowrap shadow-xs ${
-              line.characteristic === 'new'
-                ? 'bg-violet-100 border-violet-300 text-violet-800'
-                : 'bg-sky-100 border-sky-300 text-sky-800'
-            }`}
-          >
+          <div className="flex items-center gap-0.5 min-w-0">
             <span
-              className={`w-1.5 h-1.5 rounded-full ${
-                line.characteristic === 'new' ? 'bg-violet-600' : 'bg-sky-600'
-              }`}
-            />
-            <span className="uppercase tracking-wide">
-              {line.characteristic === 'new' ? 'New · Test' : 'Mass'}
+              className="text-slate-400 group-hover:text-blue-600 transition-colors shrink-0"
+              title="Kéo thả để thay đổi vị trí thẻ Line"
+            >
+              <GripVertical className="w-3 h-3" />
             </span>
-          </span>
+            <span
+              title={
+                line.characteristic === 'new'
+                  ? 'Đặc tính Line: New — Line đang test thử model mới'
+                  : 'Đặc tính Line: Mass — Đã đi vào sản xuất hàng loạt'
+              }
+              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[9px] font-extrabold leading-none whitespace-nowrap shadow-xs ${
+                line.characteristic === 'new'
+                  ? 'bg-violet-100 border-violet-300 text-violet-800'
+                  : 'bg-sky-100 border-sky-300 text-sky-800'
+              }`}
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  line.characteristic === 'new' ? 'bg-violet-600' : 'bg-sky-600'
+                }`}
+              />
+              <span className="uppercase tracking-wide">
+                {line.characteristic === 'new' ? 'New · Test' : 'Mass'}
+              </span>
+            </span>
+          </div>
           <div className="flex items-center gap-1 min-w-0">
             <span
               title={`Nhà máy hiện tại: ${getLineFactory(line)}${
@@ -604,7 +656,7 @@ export function LineNetworkDiagram({
             Sơ Đồ Tiến Độ Dây Chuyền Sản Xuất (Line Progress &amp; Issues)
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Mô phỏng luồng điều phối từ {activeCenter.name} đến {lines.length} dây chuyền sản xuất chính · Viền neon &amp; màu sắc tự động đồng bộ theo tình trạng Line, % Vật Tư và Issue
+            Mô phỏng luồng điều phối từ {activeCenter.name} đến {lines.length} dây chuyền sản xuất chính · Kéo thả trực tiếp các thẻ Line để sắp xếp vị trí trong trung tâm
           </p>
         </div>
 

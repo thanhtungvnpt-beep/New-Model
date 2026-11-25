@@ -262,6 +262,8 @@ export function OperationFormModal({
                     <option>Khu vực Kệ A2 - Khay IC chống tĩnh điện ESD</option>
                     <option>Khu vực Kệ B4 - Kho linh kiện Bo mạch PCB</option>
                     <option>Khu vực Kho Cơ Khí Nặng - Pallet C1</option>
+                    <option>Khu vực Cải Tiến - Hiệu chỉnh linh kiện</option>
+                    <option>Khu vực EDM - Gia công phóng điện</option>
                   </select>
                 </label>
                 <label className="block">
@@ -303,6 +305,30 @@ export function OperationFormModal({
                     className="w-full rounded-lg border border-slate-300 text-xs px-3 py-2"
                   />
                 </label>
+                <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-lg border border-amber-200 bg-amber-50/50 p-3">
+                  <label className="block">
+                    <span className="text-amber-900 font-bold mb-1 block">
+                      Mục nhỏ 1: Cải Tiến (SL)
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      defaultValue={0}
+                      className="w-full rounded-lg border border-amber-300 bg-white text-xs px-3 py-1.5 font-bold text-amber-800 tabular-nums"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-cyan-900 font-bold mb-1 block">
+                      Mục nhỏ 2: EDM (SL)
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      defaultValue={0}
+                      className="w-full rounded-lg border border-cyan-300 bg-white text-xs px-3 py-1.5 font-bold text-cyan-800 tabular-nums"
+                    />
+                  </label>
+                </div>
               </div>
 
               <div className="pt-4 border-t border-slate-200 flex items-center justify-end gap-2">
@@ -917,6 +943,11 @@ export function PurchasingReportModal({
 
   const totalToBuy = draftItems.reduce((acc, it) => acc + it.toBuy, 0);
   const totalInStock = draftItems.reduce((acc, it) => acc + it.inWarehouse, 0);
+  const totalImprovement = draftItems.reduce(
+    (acc, it) => acc + (it.warehouseImprovement ?? 0),
+    0
+  );
+  const totalEdm = draftItems.reduce((acc, it) => acc + (it.warehouseEdm ?? 0), 0);
   const ratio = totalToBuy > 0 ? ((totalInStock / totalToBuy) * 100).toFixed(1) : '0.0';
 
   const handleApplyPaste = () => {
@@ -1084,6 +1115,11 @@ export function PurchasingReportModal({
                 {totalInStock}
               </span>
               <span className="text-xs text-slate-500 ml-1">đơn vị</span>
+              <div className="mt-1 flex items-center gap-2 text-[11px] font-bold tabular-nums">
+                <span className="text-amber-700">Cải Tiến: {totalImprovement}</span>
+                <span className="text-slate-300">·</span>
+                <span className="text-cyan-700">EDM: {totalEdm}</span>
+              </div>
             </div>
             <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl">
               <span className="text-xs text-slate-500 block">Tiến độ về kho / Cần mua:</span>
@@ -1116,6 +1152,12 @@ export function PurchasingReportModal({
                     </th>
                     <th className="py-2.5 px-3 border-r border-slate-300 text-right w-24 text-emerald-700">
                       Đã về kho
+                    </th>
+                    <th className="py-2.5 px-2.5 border-r border-slate-300 text-right w-20 text-amber-700 bg-amber-50/50">
+                      Cải Tiến
+                    </th>
+                    <th className="py-2.5 px-2.5 border-r border-slate-300 text-right w-20 text-cyan-700 bg-cyan-50/50">
+                      EDM
                     </th>
                     <th className="py-2.5 px-3 text-left min-w-[180px] text-rose-700 bg-rose-50/50">
                       Issue tracker
@@ -1165,6 +1207,40 @@ export function PurchasingReportModal({
                               );
                             }}
                             className="w-16 text-right py-0.5 px-1.5 border border-slate-200 rounded text-xs font-bold text-emerald-700 bg-white tabular-nums"
+                          />
+                        </td>
+                        <td className="py-2 px-2.5 border-r border-slate-200 text-right bg-amber-50/20">
+                          <input
+                            type="number"
+                            min={0}
+                            aria-label={`Cải Tiến ${it.itemNo}`}
+                            value={it.warehouseImprovement ?? 0}
+                            onChange={(e) => {
+                              const val = Math.max(0, Number(e.target.value) || 0);
+                              setDraftItems((prev) =>
+                                prev.map((row, rIdx) =>
+                                  rIdx === idx ? { ...row, warehouseImprovement: val } : row
+                                )
+                              );
+                            }}
+                            className="w-14 text-right py-0.5 px-1.5 border border-amber-200 rounded text-xs font-bold text-amber-800 bg-white tabular-nums"
+                          />
+                        </td>
+                        <td className="py-2 px-2.5 border-r border-slate-200 text-right bg-cyan-50/20">
+                          <input
+                            type="number"
+                            min={0}
+                            aria-label={`EDM ${it.itemNo}`}
+                            value={it.warehouseEdm ?? 0}
+                            onChange={(e) => {
+                              const val = Math.max(0, Number(e.target.value) || 0);
+                              setDraftItems((prev) =>
+                                prev.map((row, rIdx) =>
+                                  rIdx === idx ? { ...row, warehouseEdm: val } : row
+                                )
+                              );
+                            }}
+                            className="w-14 text-right py-0.5 px-1.5 border border-cyan-200 rounded text-xs font-bold text-cyan-800 bg-white tabular-nums"
                           />
                         </td>
                         <td className="py-2 px-3">

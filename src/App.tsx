@@ -358,13 +358,27 @@ export default function App() {
   const handleExportFullReport = () => {
     downloadCsvFile(
       `${activeCenter.code}_Bao_Cao_Tien_Do_${selectedProject}.csv`,
-      ['Item No', 'Tên Item', 'Target Demand', 'Cần mua', 'Đã về kho', 'Nhập Vendor', 'Set lên Line', 'Line Test', 'Issue Mua Hàng'],
+      [
+        'Item No',
+        'Tên Item',
+        'Target Demand',
+        'Cần mua',
+        'Đã về kho',
+        'Kho - Cải Tiến',
+        'Kho - EDM',
+        'Nhập Vendor',
+        'Set lên Line',
+        'Line Test',
+        'Issue Mua Hàng',
+      ],
       pipelineItems.map((it) => [
         it.itemNo,
         it.name,
         it.targetDemand,
         it.toBuy,
         it.inWarehouse,
+        it.warehouseImprovement ?? 0,
+        it.warehouseEdm ?? 0,
         it.vendorInbound,
         it.stagedOnLine,
         it.lineTested,
@@ -395,13 +409,15 @@ export default function App() {
   const handleDownloadTemplate = (name: string) => {
     downloadCsvFile(
       name,
-      ['Item No', 'Tên Item', 'Target Demand', 'Cần mua', 'Đã về kho', 'Issue tracker'],
+      ['Item No', 'Tên Item', 'Target Demand', 'Cần mua', 'Đã về kho', 'Kho - Cải Tiến', 'Kho - EDM', 'Issue tracker'],
       pipelineItems.map((it) => [
         it.itemNo,
         it.name,
         it.targetDemand,
         it.toBuy,
         it.inWarehouse,
+        it.warehouseImprovement ?? 0,
+        it.warehouseEdm ?? 0,
         it.purchaseIssue,
       ])
     );
@@ -846,6 +862,29 @@ export default function App() {
     );
   };
 
+  const handleReorderLines = (fromLineId: string, toLineId: string) => {
+    if (!fromLineId || !toLineId || fromLineId === toLineId) return;
+    const fromLine = lines.find((l) => l.id === fromLineId);
+    const toLine = lines.find((l) => l.id === toLineId);
+    if (!fromLine || !toLine) return;
+
+    setLines((prev) => {
+      const fromIndex = prev.findIndex((l) => l.id === fromLineId);
+      const toIndex = prev.findIndex((l) => l.id === toLineId);
+      if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      return next;
+    });
+
+    pushToast(
+      'Đã cập nhật vị trí Line',
+      `Đã di chuyển ${fromLine.name} đến vị trí của ${toLine.name} tại ${activeCenter.code}.`,
+      'blue'
+    );
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-800">
       <TopNav
@@ -912,6 +951,7 @@ export default function App() {
               }}
               onClearLineFilter={() => setSelectedLineFilter('all')}
               onOpenAddLine={() => setAddLineOpen(true)}
+              onReorderLines={handleReorderLines}
             />
 
             <TargetDemandSpecs
@@ -989,6 +1029,18 @@ export default function App() {
                   <strong className="text-blue-700">
                     {pipelineItems.reduce((sum, it) => sum + it.inWarehouse, 0)} /{' '}
                     {pipelineItems.reduce((sum, it) => sum + it.targetDemand, 0)}
+                  </strong>
+                </span>
+                <span>
+                  Cải Tiến:{' '}
+                  <strong className="text-indigo-700">
+                    {pipelineItems.reduce((sum, it) => sum + (it.warehouseImprovement ?? 0), 0)}
+                  </strong>
+                </span>
+                <span>
+                  EDM:{' '}
+                  <strong className="text-amber-700">
+                    {pipelineItems.reduce((sum, it) => sum + (it.warehouseEdm ?? 0), 0)}
                   </strong>
                 </span>
                 <span>

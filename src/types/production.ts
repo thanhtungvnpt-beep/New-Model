@@ -140,6 +140,8 @@ export interface PipelineItem {
   targetDemand: number;
   toBuy: number;
   inWarehouse: number;
+  warehouseImprovement?: number;
+  warehouseEdm?: number;
   vendorInbound: number;
   stagedOnLine: number;
   lineTested: number;
